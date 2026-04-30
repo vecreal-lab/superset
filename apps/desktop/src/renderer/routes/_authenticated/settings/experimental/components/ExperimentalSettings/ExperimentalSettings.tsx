@@ -61,14 +61,14 @@ export function ExperimentalSettings({
 					<div className="flex items-center justify-between">
 						<div className="space-y-0.5">
 							<Label htmlFor="superset-v2" className="text-sm font-medium">
-								Try Superset Version 2 (Early Access)
+								Superset Version 2
 							</Label>
 							<p className="text-xs text-muted-foreground">
-								Use the new workspace experience when early access is available
+								Turn off to fall back to the legacy v1 interface.
 							</p>
 							{!isRemoteV2Enabled && (
 								<p className="text-xs text-muted-foreground">
-									Early access is not enabled for this account.
+									V2 is not enabled for this account.
 								</p>
 							)}
 						</div>
