@@ -30,9 +30,9 @@ export const LEGACY_BUILTIN_TERMINAL_AGENT_OVERRIDES: Readonly<
 	},
 	codex: {
 		command:
-			'codex -c model_reasoning_effort="high" --dangerously-bypass-approvals-and-sandbox -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true',
+			'codex -c model_reasoning_effort="xhigh" --dangerously-bypass-approvals-and-sandbox -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true',
 		promptCommand:
-			'codex -c model_reasoning_effort="high" --dangerously-bypass-approvals-and-sandbox -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --',
+			'codex -c model_reasoning_effort="xhigh" --dangerously-bypass-approvals-and-sandbox -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --',
 	},
 	gemini: {
 		command: "gemini --yolo",

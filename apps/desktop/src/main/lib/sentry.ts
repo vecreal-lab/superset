@@ -8,6 +8,10 @@ let sentryInitialized = false;
 export function initSentry(): void {
 	if (sentryInitialized) return;
 
+	if (env.FACTORY_LOCAL_ONLY === "true") {
+		return;
+	}
+
 	if (!env.SENTRY_DSN_DESKTOP || env.NODE_ENV !== "production") {
 		return;
 	}

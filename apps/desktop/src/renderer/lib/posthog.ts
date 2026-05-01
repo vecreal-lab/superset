@@ -6,6 +6,11 @@ import { env } from "../env.renderer";
 export const posthog = posthogFull as unknown as PostHog;
 
 export function initPostHog() {
+	if (env.FACTORY_LOCAL_ONLY === "true") {
+		console.log("[posthog] Factory local-only mode, skipping");
+		return;
+	}
+
 	if (!env.NEXT_PUBLIC_POSTHOG_KEY) {
 		console.log("[posthog] No key configured, skipping");
 		return;

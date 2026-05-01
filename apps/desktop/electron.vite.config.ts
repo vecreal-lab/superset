@@ -21,6 +21,32 @@ import {
 config({ path: resolve(__dirname, "../../.env"), override: true, quiet: true });
 
 const DEV_SERVER_PORT = Number(process.env.DESKTOP_VITE_PORT);
+const LOCAL_ONLY_FALSE_VALUES = new Set(["0", "false", "no", "off"]);
+const FACTORY_LOCAL_ONLY = !LOCAL_ONLY_FALSE_VALUES.has(
+	(process.env.FACTORY_LOCAL_ONLY ?? "true").toLowerCase(),
+);
+const LOCAL_ONLY_URLS = {
+	api: "http://127.0.0.1:37111",
+	streams: "http://127.0.0.1:37113",
+	web: "http://127.0.0.1:37110",
+	marketing: "http://127.0.0.1:37110",
+	docs: "http://127.0.0.1:37112",
+	electric: "http://127.0.0.1:37114",
+	relay: "http://127.0.0.1:37115",
+	streamRuntime: "http://127.0.0.1:37116",
+} as const;
+
+function factoryUrlEnv(
+	value: string | undefined,
+	cloudFallback: string,
+	localFallback: string,
+): string {
+	return defineEnv(FACTORY_LOCAL_ONLY ? localFallback : value, cloudFallback);
+}
+
+function factoryOptionalCloudEnv(value: string | undefined): string {
+	return defineEnv(FACTORY_LOCAL_ONLY ? undefined : value);
+}
 
 // Validate required env vars at build time using the Zod schema (single source of truth)
 await import("./src/main/env.main");
@@ -34,7 +60,7 @@ const workspaceDependencies = Object.keys(dependencies).filter((dependency) =>
 );
 
 // Sentry plugin for uploading sourcemaps (only in CI with auth token)
-const sentryPlugin = process.env.SENTRY_AUTH_TOKEN
+const sentryPlugin = !FACTORY_LOCAL_ONLY && process.env.SENTRY_AUTH_TOKEN
 	? sentryVitePlugin({
 			org: "superset-sh",
 			project: "desktop",
@@ -53,39 +79,51 @@ export default defineConfig({
 				process.env.SKIP_ENV_VALIDATION,
 				"",
 			),
-			"process.env.NEXT_PUBLIC_API_URL": defineEnv(
+			"process.env.FACTORY_LOCAL_ONLY": defineEnv(
+				FACTORY_LOCAL_ONLY ? "true" : "false",
+			),
+			"process.env.NEXT_PUBLIC_API_URL": factoryUrlEnv(
 				process.env.NEXT_PUBLIC_API_URL,
 				"https://api.superset.sh",
+				LOCAL_ONLY_URLS.api,
 			),
 			"process.env.NEXT_PUBLIC_STREAMS_URL": defineEnv(
-				process.env.NEXT_PUBLIC_STREAMS_URL,
+				FACTORY_LOCAL_ONLY
+					? LOCAL_ONLY_URLS.streams
+					: process.env.NEXT_PUBLIC_STREAMS_URL,
 				"https://streams.superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_WEB_URL": defineEnv(
-				process.env.NEXT_PUBLIC_WEB_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.web : process.env.NEXT_PUBLIC_WEB_URL,
 				"https://app.superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_MARKETING_URL": defineEnv(
-				process.env.NEXT_PUBLIC_MARKETING_URL,
+				FACTORY_LOCAL_ONLY
+					? LOCAL_ONLY_URLS.marketing
+					: process.env.NEXT_PUBLIC_MARKETING_URL,
 				"https://superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_DOCS_URL": defineEnv(
-				process.env.NEXT_PUBLIC_DOCS_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.docs : process.env.NEXT_PUBLIC_DOCS_URL,
 				"https://docs.superset.sh",
 			),
-			"process.env.SENTRY_DSN_DESKTOP": defineEnv(
+			"process.env.SENTRY_DSN_DESKTOP": factoryOptionalCloudEnv(
 				process.env.SENTRY_DSN_DESKTOP,
 			),
-			"process.env.RELAY_URL": defineEnv(process.env.RELAY_URL),
+			"process.env.RELAY_URL": defineEnv(
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.relay : process.env.RELAY_URL,
+			),
 			// Must match renderer for analytics in main process
-			"process.env.NEXT_PUBLIC_POSTHOG_KEY": defineEnv(
+			"process.env.NEXT_PUBLIC_POSTHOG_KEY": factoryOptionalCloudEnv(
 				process.env.NEXT_PUBLIC_POSTHOG_KEY,
 			),
 			"process.env.NEXT_PUBLIC_POSTHOG_HOST": defineEnv(
-				process.env.NEXT_PUBLIC_POSTHOG_HOST,
+				FACTORY_LOCAL_ONLY
+					? undefined
+					: process.env.NEXT_PUBLIC_POSTHOG_HOST,
 			),
 			"process.env.STREAMS_URL": defineEnv(
-				process.env.STREAMS_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.streamRuntime : process.env.STREAMS_URL,
 				"https://superset-stream.fly.dev",
 			),
 			"process.env.DESKTOP_VITE_PORT": defineEnv(process.env.DESKTOP_VITE_PORT),
@@ -162,44 +200,55 @@ export default defineConfig({
 	renderer: {
 		define: {
 			"process.env.NODE_ENV": defineEnv(process.env.NODE_ENV),
+			"process.env.FACTORY_LOCAL_ONLY": defineEnv(
+				FACTORY_LOCAL_ONLY ? "true" : "false",
+			),
 			"process.env.SKIP_ENV_VALIDATION": defineEnv(
 				process.env.SKIP_ENV_VALIDATION,
 				"",
 			),
 			"process.platform": defineEnv(process.platform),
 			"process.env.NEXT_PUBLIC_API_URL": defineEnv(
-				process.env.NEXT_PUBLIC_API_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.api : process.env.NEXT_PUBLIC_API_URL,
 				"https://api.superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_WEB_URL": defineEnv(
-				process.env.NEXT_PUBLIC_WEB_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.web : process.env.NEXT_PUBLIC_WEB_URL,
 				"https://app.superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_MARKETING_URL": defineEnv(
-				process.env.NEXT_PUBLIC_MARKETING_URL,
+				FACTORY_LOCAL_ONLY
+					? LOCAL_ONLY_URLS.marketing
+					: process.env.NEXT_PUBLIC_MARKETING_URL,
 				"https://superset.sh",
 			),
 			"process.env.NEXT_PUBLIC_ELECTRIC_URL": defineEnv(
-				process.env.NEXT_PUBLIC_ELECTRIC_URL,
+				FACTORY_LOCAL_ONLY
+					? LOCAL_ONLY_URLS.electric
+					: process.env.NEXT_PUBLIC_ELECTRIC_URL,
 				"https://electric-proxy.avi-6ac.workers.dev",
 			),
 			"process.env.NEXT_PUBLIC_DOCS_URL": defineEnv(
-				process.env.NEXT_PUBLIC_DOCS_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.docs : process.env.NEXT_PUBLIC_DOCS_URL,
 				"https://docs.superset.sh",
 			),
 			"import.meta.env.DEV_SERVER_PORT": defineEnv(String(DEV_SERVER_PORT)),
-			"import.meta.env.NEXT_PUBLIC_POSTHOG_KEY": defineEnv(
+			"import.meta.env.NEXT_PUBLIC_POSTHOG_KEY": factoryOptionalCloudEnv(
 				process.env.NEXT_PUBLIC_POSTHOG_KEY,
 			),
 			"import.meta.env.NEXT_PUBLIC_POSTHOG_HOST": defineEnv(
-				process.env.NEXT_PUBLIC_POSTHOG_HOST,
+				FACTORY_LOCAL_ONLY
+					? undefined
+					: process.env.NEXT_PUBLIC_POSTHOG_HOST,
 			),
-			"import.meta.env.SENTRY_DSN_DESKTOP": defineEnv(
+			"import.meta.env.SENTRY_DSN_DESKTOP": factoryOptionalCloudEnv(
 				process.env.SENTRY_DSN_DESKTOP,
 			),
-			"process.env.RELAY_URL": defineEnv(process.env.RELAY_URL),
+			"process.env.RELAY_URL": defineEnv(
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.relay : process.env.RELAY_URL,
+			),
 			"process.env.STREAMS_URL": defineEnv(
-				process.env.STREAMS_URL,
+				FACTORY_LOCAL_ONLY ? LOCAL_ONLY_URLS.streamRuntime : process.env.STREAMS_URL,
 				"https://superset-stream.fly.dev",
 			),
 			"process.env.DESKTOP_VITE_PORT": defineEnv(process.env.DESKTOP_VITE_PORT),

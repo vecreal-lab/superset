@@ -18,8 +18,8 @@ function SignInPage() {
 	const signInMutation = electronTrpc.auth.signIn.useMutation();
 	const { hasLocalToken, isPending, session } = useSessionRecovery();
 
-	// Dev bypass: skip sign-in entirely
-	if (env.SKIP_ENV_VALIDATION) {
+	// Dev/local-only bypass: skip sign-in entirely.
+	if (env.SKIP_ENV_VALIDATION || env.FACTORY_LOCAL_ONLY === "true") {
 		return <Navigate to="/workspace" replace />;
 	}
 

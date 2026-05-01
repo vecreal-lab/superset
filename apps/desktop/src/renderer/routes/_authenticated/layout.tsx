@@ -60,8 +60,10 @@ function AuthenticatedLayout() {
 	const shownWorkspaceInitWarningsRef = useRef(new Set<string>());
 	const { isV2CloudEnabled } = useIsV2CloudEnabled();
 
-	const isSignedIn = env.SKIP_ENV_VALIDATION || !!session?.user;
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
+	const authBypassEnabled = env.SKIP_ENV_VALIDATION || isFactoryLocalOnly;
+	const isSignedIn = authBypassEnabled || !!session?.user;
+	const activeOrganizationId = authBypassEnabled
 		? MOCK_ORG_ID
 		: session?.session?.activeOrganizationId;
 
@@ -157,12 +159,12 @@ function AuthenticatedLayout() {
 		},
 	});
 
-	if (isPending && !hasLocalToken && !env.SKIP_ENV_VALIDATION) {
+	if (isPending && !hasLocalToken && !authBypassEnabled) {
 		return <Navigate to="/sign-in" replace />;
 	}
 	if (
 		(isPending || (isRefetching && !session?.user && hasLocalToken)) &&
-		!env.SKIP_ENV_VALIDATION
+		!authBypassEnabled
 	) {
 		return (
 			<div className="flex h-screen w-screen items-center justify-center bg-background">

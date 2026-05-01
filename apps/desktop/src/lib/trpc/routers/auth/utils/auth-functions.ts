@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import { join } from "node:path";
+import { env } from "main/env.main";
 import { SUPERSET_HOME_DIR } from "main/lib/app-environment";
 import { PROTOCOL_SCHEME } from "shared/constants";
 import { decrypt, encrypt } from "./crypto-storage";
@@ -30,6 +31,13 @@ export async function loadToken(): Promise<{
 	token: string | null;
 	expiresAt: string | null;
 }> {
+	if (env.FACTORY_LOCAL_ONLY === "true") {
+		return {
+			token: "factory-local-only-token",
+			expiresAt: "2099-12-31T23:59:59.000Z",
+		};
+	}
+
 	try {
 		const data = decrypt(await fs.readFile(TOKEN_FILE));
 		const parsed: StoredAuth = JSON.parse(data);

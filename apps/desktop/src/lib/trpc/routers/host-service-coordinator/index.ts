@@ -15,11 +15,11 @@ export const createHostServiceCoordinatorRouter = () => {
 		start: publicProcedure.input(orgInput).mutation(async ({ input }) => {
 			const coordinator = getHostServiceCoordinator();
 			const { token } = await loadToken();
-			if (!token) {
+			if (!token && env.FACTORY_LOCAL_ONLY !== "true") {
 				throw new Error("No auth token available — user must be logged in");
 			}
 			return coordinator.start(input.organizationId, {
-				authToken: token,
+				authToken: token ?? "factory-local-only-token",
 				cloudApiUrl: env.NEXT_PUBLIC_API_URL,
 			});
 		}),
@@ -37,11 +37,11 @@ export const createHostServiceCoordinatorRouter = () => {
 		restart: publicProcedure.input(orgInput).mutation(async ({ input }) => {
 			const coordinator = getHostServiceCoordinator();
 			const { token } = await loadToken();
-			if (!token) {
+			if (!token && env.FACTORY_LOCAL_ONLY !== "true") {
 				throw new Error("No auth token available — user must be logged in");
 			}
 			return coordinator.restart(input.organizationId, {
-				authToken: token,
+				authToken: token ?? "factory-local-only-token",
 				cloudApiUrl: env.NEXT_PUBLIC_API_URL,
 			});
 		}),

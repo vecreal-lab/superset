@@ -75,6 +75,10 @@ export const createAuthRouter = () => {
 			.input(z.object({ provider: z.enum(AUTH_PROVIDERS) }))
 			.mutation(async ({ input }) => {
 				try {
+					if (env.FACTORY_LOCAL_ONLY === "true") {
+						return { success: true };
+					}
+
 					const state = crypto.randomBytes(32).toString("base64url");
 					stateStore.set(state, Date.now());
 

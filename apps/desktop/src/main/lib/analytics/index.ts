@@ -7,6 +7,10 @@ export let posthog: PostHog | null = null;
 let userId: string | null = null;
 
 function getClient(): PostHog | null {
+	if (env.FACTORY_LOCAL_ONLY === "true") {
+		return null;
+	}
+
 	if (!env.NEXT_PUBLIC_POSTHOG_KEY) {
 		return null;
 	}
@@ -22,6 +26,10 @@ function getClient(): PostHog | null {
 }
 
 function isTelemetryEnabled(): boolean {
+	if (env.FACTORY_LOCAL_ONLY === "true") {
+		return false;
+	}
+
 	return DEFAULT_TELEMETRY_ENABLED;
 }
 
