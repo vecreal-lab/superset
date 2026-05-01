@@ -33,7 +33,9 @@ export function preloadActiveOrganizationCollections(
 export function CollectionsProvider({ children }: { children: ReactNode }) {
 	const { data: session, refetch: refetchSession } = authClient.useSession();
 	const [isSwitching, setIsSwitching] = useState(false);
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const authBypassEnabled =
+		env.SKIP_ENV_VALIDATION || env.FACTORY_LOCAL_ONLY === "true";
+	const activeOrganizationId = authBypassEnabled
 		? MOCK_ORG_ID
 		: session?.session?.activeOrganizationId;
 

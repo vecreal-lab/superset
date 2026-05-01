@@ -87,7 +87,9 @@ export function useMigrateV1DataToV2({
 		getMigrationRunningSnapshot,
 		getMigrationRunningSnapshot,
 	);
-	const organizationId = env.SKIP_ENV_VALIDATION
+	const authBypassEnabled =
+		env.SKIP_ENV_VALIDATION || env.FACTORY_LOCAL_ONLY === "true";
+	const organizationId = authBypassEnabled
 		? MOCK_ORG_ID
 		: (session?.session?.activeOrganizationId ?? null);
 	const attemptedRef = useRef<string | null>(null);

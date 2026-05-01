@@ -2,12 +2,24 @@ import { useEffect } from "react";
 import { track } from "renderer/lib/analytics";
 import { authClient } from "renderer/lib/auth-client";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { env } from "renderer/env.renderer";
 import { posthog } from "../../lib/posthog";
 
 const AUTH_COMPLETED_KEY = "superset_auth_completed";
 const ACTIVE_ORG_ID_KEY = "active_organization_id";
 
+// FACTORY_LOCAL_ONLY: skip cloud auth subscription that produces
+// ERR_CONNECTION_REFUSED noise against the rewritten 127.0.0.1:37111 placeholder.
+const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
+
 export function PostHogUserIdentifier() {
+	if (isFactoryLocalOnly) {
+		return null;
+	}
+	return <PostHogUserIdentifierInner />;
+}
+
+function PostHogUserIdentifierInner() {
 	const { data: session } = authClient.useSession();
 	const user = session?.user;
 	const activeOrganizationId = session?.session?.activeOrganizationId;

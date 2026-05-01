@@ -1,7 +1,14 @@
 import { type ReactNode, useEffect, useState } from "react";
 import { authClient, setAuthToken, setJwt } from "renderer/lib/auth-client";
+import { env } from "renderer/env.renderer";
 import { SupersetLogo } from "renderer/routes/sign-in/components/SupersetLogo/SupersetLogo";
 import { electronTrpc } from "../../lib/electron-trpc";
+
+// FACTORY_LOCAL_ONLY: bypass cloud auth fetches that would otherwise hit
+// rewritten local placeholder URLs (127.0.0.1:37111) where nothing listens.
+// The synthetic local token from auth-functions.ts is sufficient for local-only
+// operation; we skip the better-auth HTTP calls entirely.
+const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
 
 export function AuthProvider({ children }: { children: ReactNode }) {
 	const [isHydrated, setIsHydrated] = useState(false);
@@ -19,6 +26,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 		let cancelled = false;
 
 		async function hydrate() {
+			// Local-only mode: skip cloud auth fetches; synthetic token is enough.
+			if (isFactoryLocalOnly) {
+				if (storedToken?.token) {
+					setAuthToken(storedToken.token);
+				}
+				if (!cancelled) {
+					setIsHydrated(true);
+				}
+				return;
+			}
 			if (storedToken?.token && storedToken?.expiresAt) {
 				const isExpired = new Date(storedToken.expiresAt) < new Date();
 				if (!isExpired) {
@@ -87,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 	useEffect(() => {
 		if (!isHydrated) return;
+		// Local-only mode: no cloud JWT to refresh.
+		if (isFactoryLocalOnly) return;
 
 		const refreshJwt = () =>
 			authClient

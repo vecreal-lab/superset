@@ -1,6 +1,7 @@
 import {
 	createFileRoute,
 	Outlet,
+	useLocation,
 	useMatchRoute,
 	useNavigate,
 } from "@tanstack/react-router";
@@ -10,6 +11,7 @@ import { useIsV2CloudEnabled } from "renderer/hooks/useIsV2CloudEnabled";
 import { useHotkey } from "renderer/hotkeys";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { DashboardSidebar } from "renderer/routes/_authenticated/_dashboard/components/DashboardSidebar";
+import { FactorySidebar } from "renderer/routes/_authenticated/_dashboard/factory/components/FactorySidebar";
 import { useDevSeedV2Sidebar } from "renderer/routes/_authenticated/hooks/useDevSeedV2Sidebar";
 import { useMigrateV1DataToV2 } from "renderer/routes/_authenticated/hooks/useMigrateV1DataToV2";
 import { ResizablePanel } from "renderer/screens/main/components/ResizablePanel";
@@ -25,6 +27,8 @@ import {
 import { AddRepositoryModals } from "./components/AddRepositoryModals";
 import { TopBar } from "./components/TopBar";
 
+const FACTORY_SIDEBAR_WIDTH = 240;
+
 export const Route = createFileRoute("/_authenticated/_dashboard")({
 	component: DashboardLayout,
 });
@@ -33,6 +37,8 @@ function DashboardLayout() {
 	const navigate = useNavigate();
 	const openNewWorkspaceModal = useOpenNewWorkspaceModal();
 	const { isV2CloudEnabled } = useIsV2CloudEnabled();
+	const location = useLocation();
+	const isFactoryRoute = location.pathname.startsWith("/factory");
 	useDevSeedV2Sidebar();
 	useMigrateV1DataToV2();
 	// Get current workspace from route to pre-select project in new workspace modal
@@ -100,6 +106,26 @@ function DashboardLayout() {
 		},
 		{ enabled: !!currentWorkspaceId },
 	);
+
+	if (isFactoryRoute) {
+		return (
+			<div className="flex h-full w-full overflow-hidden">
+				<div
+					className="drag h-8 w-full shrink-0 absolute top-0 left-0 right-0 z-10"
+					aria-hidden="true"
+				/>
+				<div
+					className="shrink-0 border-r"
+					style={{ width: `${FACTORY_SIDEBAR_WIDTH}px` }}
+				>
+					<FactorySidebar />
+				</div>
+				<div className="flex flex-1 min-h-0 min-w-0 flex-col pt-8">
+					<Outlet />
+				</div>
+			</div>
+		);
+	}
 
 	return (
 		<div className="flex h-full w-full overflow-hidden">

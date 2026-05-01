@@ -161,7 +161,9 @@ export function useDashboardSidebarData() {
 			})),
 		[collections],
 	);
-	const activeOrganizationId = env.SKIP_ENV_VALIDATION
+	const authBypassEnabled =
+		env.SKIP_ENV_VALIDATION || env.FACTORY_LOCAL_ONLY === "true";
+	const activeOrganizationId = authBypassEnabled
 		? MOCK_ORG_ID
 		: (session?.session?.activeOrganizationId ?? null);
 	const activeHostClient = activeHostUrl

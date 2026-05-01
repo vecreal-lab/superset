@@ -22,7 +22,9 @@ function getMigrationMarkerKey(organizationId: string): string {
 export function useMigrateV1PresetsToV2() {
 	const collections = useCollections();
 	const { data: session } = authClient.useSession();
-	const organizationId = env.SKIP_ENV_VALIDATION
+	const authBypassEnabled =
+		env.SKIP_ENV_VALIDATION || env.FACTORY_LOCAL_ONLY === "true";
+	const organizationId = authBypassEnabled
 		? MOCK_ORG_ID
 		: session?.session?.activeOrganizationId;
 	const migratedOrgRef = useRef<string | null>(null);
