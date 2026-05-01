@@ -5,11 +5,13 @@ import {
 } from "main/lib/factory-read-model";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
+import { createDialogueRouter } from "./dialogue";
 
 const datasetSchema = z.enum(FACTORY_DATASETS);
 
 export const createFactoryRouter = () =>
 	router({
+		dialogue: createDialogueRouter(),
 		summary: publicProcedure.query(async () => {
 			return getFactoryReadModel().summary();
 		}),
