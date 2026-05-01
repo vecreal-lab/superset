@@ -60,6 +60,7 @@ export function DashboardSidebarHeader({
 	const isWorkspacesListOpen = !!matchRoute({ to: "/v2-workspaces" });
 	const isTasksOpen = !!matchRoute({ to: "/tasks", fuzzy: true });
 	const isAutomationsOpen = !!matchRoute({ to: "/automations", fuzzy: true });
+	const isFactoryOpen = !!matchRoute({ to: "/factory", fuzzy: true });
 
 	const showAutomations = useFeatureFlagEnabled(
 		FEATURE_FLAGS.AUTOMATIONS_ACCESS,
@@ -89,6 +90,10 @@ export function DashboardSidebarHeader({
 			if (lastSearch) search.search = lastSearch;
 			navigate({ to: "/tasks", search });
 		});
+	};
+
+	const handleFactoryClick = () => {
+		navigate({ to: "/factory" });
 	};
 
 	if (isCollapsed) {
@@ -130,6 +135,24 @@ export function DashboardSidebarHeader({
 						</button>
 					</TooltipTrigger>
 					<TooltipContent side="right">Tasks</TooltipContent>
+				</Tooltip>
+
+				<Tooltip delayDuration={300}>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={handleFactoryClick}
+							className={cn(
+								"flex size-8 items-center justify-center rounded-md transition-colors",
+								isFactoryOpen
+									? "bg-accent text-foreground"
+									: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+							)}
+						>
+							<LuLayers className="size-4" />
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="right">Factory</TooltipContent>
 				</Tooltip>
 
 				<DropdownMenu>
@@ -273,6 +296,20 @@ export function DashboardSidebarHeader({
 			>
 				<HiOutlineClipboardDocumentList className="size-4 shrink-0" />
 				<span className="flex-1 text-left">Tasks</span>
+			</button>
+
+			<button
+				type="button"
+				onClick={handleFactoryClick}
+				className={cn(
+					"flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium transition-colors",
+					isFactoryOpen
+						? "bg-accent text-foreground"
+						: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+				)}
+			>
+				<LuLayers className="size-4 shrink-0" />
+				<span className="flex-1 text-left">Factory</span>
 			</button>
 
 			<button

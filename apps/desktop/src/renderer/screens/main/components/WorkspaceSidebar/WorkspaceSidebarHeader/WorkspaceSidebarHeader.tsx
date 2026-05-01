@@ -20,6 +20,7 @@ export function WorkspaceSidebarHeader({
 	const { gateFeature } = usePaywall();
 
 	const isWorkspacesListOpen = !!matchRoute({ to: "/workspaces" });
+	const isFactoryOpen = !!matchRoute({ to: "/factory", fuzzy: true });
 	const isTasksOpen = !!matchRoute({ to: "/tasks", fuzzy: true });
 
 	const handleWorkspacesClick = () => {
@@ -45,6 +46,10 @@ export function WorkspaceSidebarHeader({
 			if (lastSearch) search.search = lastSearch;
 			navigate({ to: "/tasks", search });
 		});
+	};
+
+	const handleFactoryClick = () => {
+		navigate({ to: "/factory" });
 	};
 
 	if (isCollapsed) {
@@ -89,6 +94,24 @@ export function WorkspaceSidebarHeader({
 					<TooltipContent side="right">Tasks</TooltipContent>
 				</Tooltip>
 
+				<Tooltip delayDuration={300}>
+					<TooltipTrigger asChild>
+						<button
+							type="button"
+							onClick={handleFactoryClick}
+							className={cn(
+								"flex items-center justify-center size-8 rounded-md transition-colors",
+								isFactoryOpen
+									? "text-foreground bg-accent"
+									: "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+							)}
+						>
+							<LuLayers className="size-4" strokeWidth={STROKE_WIDTH} />
+						</button>
+					</TooltipTrigger>
+					<TooltipContent side="right">Factory</TooltipContent>
+				</Tooltip>
+
 				<NewWorkspaceButton isCollapsed />
 			</div>
 		);
@@ -129,6 +152,22 @@ export function WorkspaceSidebarHeader({
 					/>
 				</div>
 				<span className="text-sm font-medium flex-1 text-left">Tasks</span>
+			</button>
+
+			<button
+				type="button"
+				onClick={handleFactoryClick}
+				className={cn(
+					"flex items-center gap-2 px-2 py-1.5 w-full rounded-md transition-colors",
+					isFactoryOpen
+						? "text-foreground bg-accent"
+						: "text-muted-foreground hover:text-foreground hover:bg-accent/50",
+				)}
+			>
+				<div className="flex items-center justify-center size-5">
+					<LuLayers className="size-4" strokeWidth={STROKE_WIDTH} />
+				</div>
+				<span className="text-sm font-medium flex-1 text-left">Factory</span>
 			</button>
 
 			<NewWorkspaceButton />

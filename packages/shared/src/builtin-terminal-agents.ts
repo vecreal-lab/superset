@@ -62,7 +62,10 @@ export const BUILTIN_TERMINAL_AGENTS = [
 		label: "Claude",
 		description:
 			"Anthropic's coding agent for reading code, editing files, and running terminal workflows.",
-		command: "claude --permission-mode acceptEdits",
+		command:
+			"claude --permission-mode acceptEdits --model claude-opus-4-7 --effort max --exclude-dynamic-system-prompt-sections",
+		promptCommand:
+			"claude -p --permission-mode acceptEdits --model claude-opus-4-7 --effort max --exclude-dynamic-system-prompt-sections",
 		includeInDefaultTerminalPresets: true,
 	}),
 	createBuiltinTerminalAgent({
@@ -80,9 +83,9 @@ export const BUILTIN_TERMINAL_AGENTS = [
 		description:
 			"OpenAI's coding agent for reading, modifying, and running code across tasks.",
 		command:
-			'codex -c model_reasoning_effort="xhigh" -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --full-auto',
+			'codex --model gpt-5.4 -c model_reasoning_effort="xhigh" -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --full-auto',
 		promptCommand:
-			'codex -c model_reasoning_effort="xhigh" -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --full-auto --',
+			'codex --model gpt-5.4 -c model_reasoning_effort="xhigh" -c model_reasoning_summary="detailed" -c model_supports_reasoning_summaries=true --full-auto --',
 		includeInDefaultTerminalPresets: true,
 	}),
 	createBuiltinTerminalAgent({

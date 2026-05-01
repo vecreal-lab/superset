@@ -1,0 +1,1 @@
+export { createFactoryRouter } from "./factory";
