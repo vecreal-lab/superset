@@ -22,6 +22,55 @@ export const createFactoryRouter = () =>
 			await getFactoryReadModel().refresh();
 			return getFactoryReadModel().summary();
 		}),
+		document: publicProcedure
+			.input(
+				z.object({
+					path: z.string().min(1),
+					maxBytes: z.number().int().positive().max(2_000_000).optional(),
+				}),
+			)
+			.query(async ({ input }) => {
+				return getFactoryReadModel().readDocument(input.path, input.maxBytes);
+			}),
+		pendingApprovals: publicProcedure.query(async () => {
+			return getFactoryReadModel().listPendingApprovals();
+		}),
+		runEvidence: publicProcedure
+			.input(z.object({ runRelativePath: z.string().min(1) }))
+			.query(async ({ input }) => {
+				return getFactoryReadModel().listRunEvidence(input.runRelativePath);
+			}),
+		writeApproval: publicProcedure
+			.input(
+				z.object({
+					runRelativePath: z.string().min(1),
+					gate: z.string().min(1),
+					status: z.enum(["approved", "revision_requested"]),
+					notes: z.string(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				return getFactoryReadModel().writeApproval(input);
+			}),
+		manualMockupManifests: publicProcedure
+			.input(z.object({ workOrderId: z.string().optional() }).optional())
+			.query(async ({ input }) => {
+				return getFactoryReadModel().listManualMockupManifests(input?.workOrderId);
+			}),
+		saveManualMockupAttachment: publicProcedure
+			.input(
+				z.object({
+					runId: z.string().min(1),
+					viewId: z.string().min(1),
+					pngBase64: z.string().min(1),
+					fileName: z.string().min(1),
+					comments: z.string(),
+					sourceText: z.string().optional(),
+				}),
+			)
+			.mutation(async ({ input }) => {
+				return getFactoryReadModel().saveManualMockupAttachment(input);
+			}),
 		workOrder: publicProcedure
 			.input(z.object({ id: z.string().min(1) }))
 			.query(async ({ input }) => {

@@ -1,5 +1,5 @@
 import { existsSync, statSync, watch, type FSWatcher } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export const FACTORY_DATASETS = [
@@ -26,6 +26,58 @@ export interface FactoryRow {
 	parse_status: "ok" | "missing" | "error";
 	quality_flags: string[];
 	data: Record<string, string | number | boolean | null>;
+}
+
+export interface FactoryDocument {
+	content: string;
+	source_path: string;
+	source_relative_path: string;
+	modified_at: string | null;
+	bytes: number;
+	truncated: boolean;
+}
+
+export interface FactoryDocumentReference {
+	title: string;
+	source_path: string;
+	source_relative_path: string;
+	modified_at: string | null;
+}
+
+export interface PendingFactoryApproval {
+	id: string;
+	work_order_id: string;
+	title: string;
+	gate: string;
+	run_id: string;
+	run_relative_path: string;
+	packet: FactoryDocument;
+	evidence_files: FactoryDocumentReference[];
+}
+
+export interface ManualMockupSlot {
+	id: string;
+	title: string;
+	purpose: string;
+	prompt_path: string;
+	png_path: string;
+	evidence_path: string;
+	comments_path: string;
+	prompt_hash: string;
+	prompt_content: string;
+	complete: boolean;
+	has_png: boolean;
+	has_evidence: boolean;
+	has_comments: boolean;
+}
+
+export interface ManualMockupManifest {
+	run_id: string;
+	work_order_id: string;
+	source_path: string;
+	source_relative_path: string;
+	awaiting_packet_path: string | null;
+	slots: ManualMockupSlot[];
 }
 
 export type FactoryIndex = Record<FactoryDataset, FactoryRow[]>;
@@ -65,6 +117,28 @@ function normalizeSlashes(value: string): string {
 
 function relativePath(root: string, absolutePath: string): string {
 	return normalizeSlashes(path.relative(root, absolutePath));
+}
+
+function isInsidePath(parent: string, candidate: string): boolean {
+	const relative = path.relative(parent, candidate);
+	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+function resolveInsideFactoryRoot(root: string, relativeOrAbsolutePath: string): string {
+	const resolved = path.resolve(root, relativeOrAbsolutePath);
+	if (!isInsidePath(root, resolved)) {
+		throw new Error(`Factory path must stay inside repo: ${relativeOrAbsolutePath}`);
+	}
+	return resolved;
+}
+
+function resolveInsideRuns(root: string, relativeOrAbsolutePath: string): string {
+	const runsRoot = path.join(root, "runs");
+	const resolved = resolveInsideFactoryRoot(root, relativeOrAbsolutePath);
+	if (!isInsidePath(runsRoot, resolved)) {
+		throw new Error(`Factory write path must stay inside runs/: ${relativeOrAbsolutePath}`);
+	}
+	return resolved;
 }
 
 function stripYamlScalar(value: string): string {
@@ -386,6 +460,76 @@ async function safeReadDir(dirPath: string): Promise<string[]> {
 	}
 }
 
+function isWorktreeRelativePath(relative: string): boolean {
+	const normalized = normalizeSlashes(relative);
+	return normalized.includes("/worktree/") || normalized.includes("-worktree/");
+}
+
+function deriveRunDir(root: string, filePath: string): string {
+	const relative = relativePath(root, filePath);
+	const parts = relative.split("/");
+	if (parts[0] === "runs" && parts[1]) {
+		return path.join(root, "runs", parts[1]);
+	}
+	return path.dirname(filePath);
+}
+
+function deriveGateName(awaitingPath: string): string {
+	let name = path.basename(awaitingPath, path.extname(awaitingPath)).toLowerCase();
+	name = name
+		.replace(/^awaiting-yuriy-review-?/, "")
+		.replace(/^awaiting-review-?/, "")
+		.replace(/^awaiting-?/, "");
+	const normalized = name
+		.replace(/[^a-z0-9]+/g, "-")
+		.replace(/^-+|-+$/g, "");
+	return normalized || "approval";
+}
+
+function approvalFileExistsForGate(runDir: string, gate: string): boolean {
+	const safeGate = gate.replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+	const candidates = [
+		`approval-${safeGate}.yml`,
+		`approval-${safeGate}.yaml`,
+	];
+	if (safeGate === "approval") {
+		candidates.push("approval.yml", "approval.yaml");
+	}
+	return candidates.some((candidate) => existsSync(path.join(runDir, candidate)));
+}
+
+function titleFromAwaitingName(filePath: string): string {
+	const gate = deriveGateName(filePath);
+	return gate
+		.split("-")
+		.filter(Boolean)
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+		.join(" ");
+}
+
+function yamlBlock(value: string): string {
+	const text = value.trimEnd();
+	if (!text) return "''";
+	return `|-\n${text
+		.split(/\r?\n/)
+		.map((line) => `  ${line}`)
+		.join("\n")}`;
+}
+
+function isPngBuffer(buffer: Buffer): boolean {
+	return (
+		buffer.length >= 8 &&
+		buffer[0] === 0x89 &&
+		buffer[1] === 0x50 &&
+		buffer[2] === 0x4e &&
+		buffer[3] === 0x47 &&
+		buffer[4] === 0x0d &&
+		buffer[5] === 0x0a &&
+		buffer[6] === 0x1a &&
+		buffer[7] === 0x0a
+	);
+}
+
 async function collectFoundations(root: string): Promise<FactoryRow[]> {
 	const shared = await walkFiles(root, "projects/_shared/foundations", [".md"]);
 	const projectFiles = (await walkFiles(root, "projects", [".md"])).filter(
@@ -567,6 +711,262 @@ export class FactoryReadModel {
 				FACTORY_DATASETS.map((dataset) => [dataset, index[dataset].length]),
 			) as Record<FactoryDataset, number>,
 		};
+	}
+
+	async readDocument(
+		relativeOrAbsolutePath: string,
+		maxBytes = 750_000,
+	): Promise<FactoryDocument> {
+		const filePath = resolveInsideFactoryRoot(this.root, relativeOrAbsolutePath);
+		const modifiedAt = await fileModifiedAt(filePath);
+		const buffer = await readFile(filePath);
+		const truncated = buffer.length > maxBytes;
+		const content = buffer.subarray(0, maxBytes).toString("utf8");
+		return {
+			content,
+			source_path: filePath,
+			source_relative_path: relativePath(this.root, filePath),
+			modified_at: modifiedAt,
+			bytes: buffer.length,
+			truncated,
+		};
+	}
+
+	async listPendingApprovals(): Promise<PendingFactoryApproval[]> {
+		const files = (await walkFiles(this.root, "runs", [".md"]))
+			.filter((filePath) => path.basename(filePath).startsWith("awaiting"))
+			.filter((filePath) => path.basename(filePath) !== "awaiting-manual-mockups.md")
+			.filter((filePath) => !isWorktreeRelativePath(relativePath(this.root, filePath)));
+		const rows: PendingFactoryApproval[] = [];
+		for (const filePath of files.sort()) {
+			const runDir = deriveRunDir(this.root, filePath);
+			const gate = deriveGateName(filePath);
+			if (approvalFileExistsForGate(runDir, gate)) continue;
+			const packet = await this.readDocument(filePath);
+			const evidenceFiles = await this.listRunEvidenceFiles(runDir);
+			const runRelativePath = relativePath(this.root, runDir);
+			const runId = runRelativePath.split("/").slice(-1)[0] || path.basename(runDir);
+			const matchingWorkOrder = (await this.getDataset("runs")).find(
+				(row) => row.id === runRelativePath,
+			);
+			const workOrderId =
+				typeof matchingWorkOrder?.data.work_order_id === "string"
+					? matchingWorkOrder.data.work_order_id
+					: runId;
+			rows.push({
+				id: `${runRelativePath}:${gate}`,
+				work_order_id: workOrderId,
+				title: titleFromAwaitingName(filePath),
+				gate,
+				run_id: runId,
+				run_relative_path: runRelativePath,
+				packet,
+				evidence_files: evidenceFiles,
+			});
+		}
+		return rows;
+	}
+
+	async writeApproval({
+		runRelativePath,
+		gate,
+		status,
+		notes,
+		approvedBy = "Yuriy",
+	}: {
+		runRelativePath: string;
+		gate: string;
+		status: "approved" | "revision_requested";
+		notes: string;
+		approvedBy?: string;
+	}): Promise<FactoryDocumentReference> {
+		const safeGate =
+			gate.toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "") ||
+			"approval";
+		const runDir = resolveInsideRuns(this.root, runRelativePath);
+		await mkdir(runDir, { recursive: true });
+		const filePath = path.join(runDir, `approval-${safeGate}.yml`);
+		const createdAt = new Date().toISOString();
+		const content = [
+			`status: ${status}`,
+			`approved_by: ${approvedBy}`,
+			`gate: ${safeGate}`,
+			"source: superset-cockpit",
+			`created_at: ${createdAt}`,
+			`notes: ${yamlBlock(notes)}`,
+			"",
+		].join("\n");
+		await writeFile(filePath, content, "utf8");
+		await this.refresh();
+		return {
+			title: path.basename(filePath),
+			source_path: filePath,
+			source_relative_path: relativePath(this.root, filePath),
+			modified_at: await fileModifiedAt(filePath),
+		};
+	}
+
+	async listRunEvidence(runRelativePath: string): Promise<FactoryDocumentReference[]> {
+		const runDir = resolveInsideRuns(this.root, runRelativePath);
+		return this.listRunEvidenceFiles(runDir);
+	}
+
+	async listManualMockupManifests(
+		workOrderId?: string,
+	): Promise<ManualMockupManifest[]> {
+		const files = (await walkFiles(this.root, "runs", [".json"]))
+			.filter((filePath) => path.basename(filePath) === "manual-mockup-manifest.json")
+			.filter((filePath) => !isWorktreeRelativePath(relativePath(this.root, filePath)));
+		const manifests: ManualMockupManifest[] = [];
+		for (const filePath of files.sort()) {
+			try {
+				const raw = await readTextFile(filePath);
+				const parsed = JSON.parse(raw);
+				const runId = String(parsed.run_id || path.basename(path.dirname(path.dirname(filePath))));
+				const manifestWorkOrderId = String(parsed.work_order_id || runId);
+				if (workOrderId && manifestWorkOrderId !== workOrderId && runId !== workOrderId) {
+					continue;
+				}
+				const views = Array.isArray(parsed.views) ? parsed.views : [];
+				const slots: ManualMockupSlot[] = [];
+				for (const view of views) {
+					const id = String(view.id || "");
+					if (!id) continue;
+					const promptPath = String(view.prompt_path || "");
+					const pngPath = String(view.png_path || `runs/${runId}/mockups/${id}.png`);
+					const evidencePath = String(
+						view.evidence_path || `runs/${runId}/mockups/${id}-evidence.json`,
+					);
+					const commentsPath = String(
+						view.comments_path || `runs/${runId}/mockups/${id}-comments.md`,
+					);
+					const promptFile = promptPath ? resolveInsideFactoryRoot(this.root, promptPath) : "";
+					const promptContent =
+						promptFile && existsSync(promptFile) ? await readTextFile(promptFile) : "";
+					const hasPng = existsSync(resolveInsideFactoryRoot(this.root, pngPath));
+					const hasEvidence = existsSync(resolveInsideFactoryRoot(this.root, evidencePath));
+					const hasComments = existsSync(resolveInsideFactoryRoot(this.root, commentsPath));
+					slots.push({
+						id,
+						title: String(view.title || id),
+						purpose: String(view.purpose || ""),
+						prompt_path: promptPath,
+						png_path: pngPath,
+						evidence_path: evidencePath,
+						comments_path: commentsPath,
+						prompt_hash: String(view.prompt_hash || ""),
+						prompt_content: promptContent,
+						complete: hasPng && hasEvidence && hasComments,
+						has_png: hasPng,
+						has_evidence: hasEvidence,
+						has_comments: hasComments,
+					});
+				}
+				const mockupDir = path.dirname(filePath);
+				const awaitingPath = path.join(mockupDir, "awaiting-manual-mockups.md");
+				manifests.push({
+					run_id: runId,
+					work_order_id: manifestWorkOrderId,
+					source_path: filePath,
+					source_relative_path: relativePath(this.root, filePath),
+					awaiting_packet_path: existsSync(awaitingPath)
+						? relativePath(this.root, awaitingPath)
+						: null,
+					slots,
+				});
+			} catch {
+				continue;
+			}
+		}
+		return manifests;
+	}
+
+	async saveManualMockupAttachment({
+		runId,
+		viewId,
+		pngBase64,
+		fileName,
+		comments,
+		sourceText,
+	}: {
+		runId: string;
+		viewId: string;
+		pngBase64: string;
+		fileName: string;
+		comments: string;
+		sourceText?: string;
+	}): Promise<ManualMockupSlot> {
+		const manifests = await this.listManualMockupManifests();
+		const manifest = manifests.find((candidate) => candidate.run_id === runId);
+		if (!manifest) throw new Error(`No manual mockup manifest found for ${runId}.`);
+		const slot = manifest.slots.find((candidate) => candidate.id === viewId);
+		if (!slot) throw new Error(`No manual mockup slot found for ${runId}/${viewId}.`);
+		const pngBuffer = Buffer.from(pngBase64, "base64");
+		if (!isPngBuffer(pngBuffer)) {
+			throw new Error("Attachment must be a valid PNG.");
+		}
+		const pngPath = resolveInsideRuns(this.root, slot.png_path);
+		const commentsPath = resolveInsideRuns(this.root, slot.comments_path);
+		const evidencePath = resolveInsideRuns(this.root, slot.evidence_path);
+		await mkdir(path.dirname(pngPath), { recursive: true });
+		await writeFile(pngPath, pngBuffer);
+		await writeFile(commentsPath, `${comments.trimEnd()}\n`, "utf8");
+		await writeFile(
+			evidencePath,
+			`${JSON.stringify(
+				{
+					model: "gpt-image-2",
+					session_id: "manual-cockpit-attachment",
+					timestamp: new Date().toISOString(),
+					prompt_hash: slot.prompt_hash,
+					source_text:
+						sourceText?.trim() ||
+						comments.trim() ||
+						"Uploaded through the Software Factory cockpit AttachmentSurface.",
+					manual_mode: true,
+					uploaded_filename: fileName,
+				},
+				null,
+				2,
+			)}\n`,
+			"utf8",
+		);
+		await this.refresh();
+		return {
+			...slot,
+			complete: true,
+			has_png: true,
+			has_evidence: true,
+			has_comments: true,
+		};
+	}
+
+	private async listRunEvidenceFiles(
+		runDir: string,
+	): Promise<FactoryDocumentReference[]> {
+		const runRelative = relativePath(this.root, runDir);
+		const files = (await walkFiles(this.root, runRelative, [
+			".md",
+			".json",
+			".jsonl",
+			".yml",
+			".yaml",
+			".png",
+		]))
+			.filter((filePath) => !isWorktreeRelativePath(relativePath(this.root, filePath)))
+			.filter((filePath) => {
+				const name = path.basename(filePath);
+				return !name.startsWith("awaiting") && !name.startsWith("approval");
+			})
+			.slice(0, 80);
+		return Promise.all(
+			files.map(async (filePath) => ({
+				title: relativePath(runDir, filePath) || path.basename(filePath),
+				source_path: filePath,
+				source_relative_path: relativePath(this.root, filePath),
+				modified_at: await fileModifiedAt(filePath),
+			})),
+		);
 	}
 
 	private async buildIndex(): Promise<FactoryIndex> {
