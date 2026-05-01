@@ -47,7 +47,7 @@ export function AppResourceSection({
 							appClasses.labelClass,
 						)}
 					>
-						Superset App
+						Software Factory App
 					</span>
 					<UsageSeverityBadge severity={appSeverity} />
 				</div>

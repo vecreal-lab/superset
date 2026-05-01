@@ -2,6 +2,7 @@ import { Button } from "@superset/ui/button";
 import { Dialog, DialogContent } from "@superset/ui/dialog";
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useRef, useState } from "react";
+import { env } from "renderer/env.renderer";
 import { track } from "renderer/lib/analytics";
 import { FeaturePreview } from "./components/FeaturePreview";
 import { FeatureSidebar } from "./components/FeatureSidebar";
@@ -34,6 +35,8 @@ export const Paywall = () => {
 			showPaywallFn = null;
 		};
 	}, []);
+
+	if (env.FACTORY_LOCAL_ONLY === "true") return null;
 
 	const triggerSource = paywallOptions?.feature;
 	const initialFeatureId =
@@ -139,7 +142,7 @@ export const Paywall = () => {
 					<Button variant="outline" onClick={() => handleOpenChange(false)}>
 						Cancel
 					</Button>
-					<Button onClick={handleUpgrade}>Get Superset Pro</Button>
+					<Button onClick={handleUpgrade}>View plans</Button>
 				</div>
 			</DialogContent>
 		</Dialog>

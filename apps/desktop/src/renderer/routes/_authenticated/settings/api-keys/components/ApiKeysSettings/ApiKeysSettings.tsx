@@ -158,7 +158,7 @@ export function ApiKeysSettings({ visibleItems }: ApiKeysSettingsProps) {
 						<h3 className="text-lg font-semibold">Your API Keys</h3>
 						<p className="text-sm text-muted-foreground">
 							API keys allow external applications like Claude Desktop or Claude
-							Code to interact with Superset on your behalf.
+							Code to interact with Software Factory on your behalf.
 						</p>
 
 						{showApiKeysList &&

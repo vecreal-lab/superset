@@ -1,6 +1,7 @@
 import { useLiveQuery } from "@tanstack/react-db";
 import { useNavigate } from "@tanstack/react-router";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { env } from "renderer/env.renderer";
 import { useCollections } from "renderer/routes/_authenticated/providers/CollectionsProvider";
 import { useTasksFilterStore } from "../../stores/tasks-filter-state";
 import { BoardContent } from "./components/BoardContent";
@@ -25,6 +26,7 @@ export function TasksView({
 	const currentTab: TabValue = initialTab ?? "all";
 	const [searchQuery, setSearchQuery] = useState(initialSearch ?? "");
 	const assigneeFilter = initialAssignee ?? null;
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
 
 	const {
 		setTab: storeSetTab,
@@ -133,7 +135,8 @@ export function TasksView({
 		});
 	};
 
-	const showLinearCTA = integrations !== undefined && !isLinearConnected;
+	const showLinearCTA =
+		!isFactoryLocalOnly && integrations !== undefined && !isLinearConnected;
 
 	return (
 		<div className="flex-1 flex flex-col min-h-0 min-w-0 overflow-hidden">

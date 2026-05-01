@@ -34,6 +34,10 @@ const sentryMiddleware = t.middleware(async ({ next, path, type }) => {
 				return result;
 			}
 
+			if (process.env.FACTORY_LOCAL_ONLY === "true") {
+				return result;
+			}
+
 			try {
 				const Sentry = await import("@sentry/electron/main");
 

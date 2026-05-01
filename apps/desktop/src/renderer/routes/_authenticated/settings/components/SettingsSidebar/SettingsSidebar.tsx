@@ -11,6 +11,7 @@ import {
 	useSettingsOriginRoute,
 	useSettingsSearchQuery,
 } from "renderer/stores/settings-state";
+import { env } from "renderer/env.renderer";
 import { getMatchCountBySection } from "../../utils/settings-search";
 import { GeneralSettings } from "./GeneralSettings";
 
@@ -19,6 +20,7 @@ export function SettingsSidebar() {
 	const setSearchQuery = useSetSettingsSearchQuery();
 	const originRoute = useSettingsOriginRoute();
 	const normalizedSearchQuery = searchQuery.trim();
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
 	const matchCounts = normalizedSearchQuery
 		? getMatchCountBySection(normalizedSearchQuery)
 		: null;
@@ -62,7 +64,8 @@ export function SettingsSidebar() {
 				<GeneralSettings matchCounts={matchCounts} />
 			</div>
 
-			<div className="pt-3 mt-3 border-t border-border">
+			{!isFactoryLocalOnly && (
+				<div className="pt-3 mt-3 border-t border-border">
 				<a
 					href={COMPANY.DOCS_URL}
 					target="_blank"
@@ -72,7 +75,8 @@ export function SettingsSidebar() {
 					<HiArrowTopRightOnSquare className="h-4 w-4" />
 					<span>Documentation</span>
 				</a>
-			</div>
+				</div>
+			)}
 		</div>
 	);
 }

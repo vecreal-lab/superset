@@ -70,7 +70,7 @@ export function PermissionsSettings({
 				<p className="text-sm text-muted-foreground mt-1">
 					Grant these permissions once to avoid repeated prompts. For persistent
 					directory access, enable Full Disk Access in System Settings for
-					Superset.
+					Software Factory.
 				</p>
 			</div>
 

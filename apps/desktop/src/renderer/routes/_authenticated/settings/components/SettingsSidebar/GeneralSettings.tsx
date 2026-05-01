@@ -20,6 +20,7 @@ import {
 } from "react-icons/hi2";
 import { LuBrain, LuGitBranch, LuKeyboard } from "react-icons/lu";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { env } from "renderer/env.renderer";
 import type { SettingsSection } from "renderer/stores/settings-state";
 
 interface GeneralSettingsProps {
@@ -53,6 +54,7 @@ interface SectionItem {
 	label: string;
 	icon: React.ReactNode;
 	macOnly?: boolean;
+	hiddenWhenLocalOnly?: boolean;
 }
 
 interface SectionGroup {
@@ -69,6 +71,7 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "account",
 				label: "Account",
 				icon: <HiOutlineUser className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 			{
 				id: "/settings/appearance",
@@ -139,6 +142,7 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "organization",
 				label: "Organization",
 				icon: <HiOutlineBuildingOffice2 className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 			{
 				id: "/settings/projects",
@@ -157,18 +161,21 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "integrations",
 				label: "Integrations",
 				icon: <HiOutlinePuzzlePiece className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 			{
 				id: "/settings/billing",
 				section: "billing",
 				label: "Billing",
 				icon: <HiOutlineCreditCard className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 			{
 				id: "/settings/api-keys",
 				section: "apikeys",
 				label: "API Keys",
 				icon: <HiOutlineKey className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 		],
 	},
@@ -193,6 +200,7 @@ const SECTION_GROUPS: SectionGroup[] = [
 				section: "experimental",
 				label: "Experimental",
 				icon: <HiOutlineBeaker className="h-4 w-4" />,
+				hiddenWhenLocalOnly: true,
 			},
 		],
 	},
@@ -202,13 +210,16 @@ export function GeneralSettings({ matchCounts }: GeneralSettingsProps) {
 	const matchRoute = useMatchRoute();
 	const { data: platform } = electronTrpc.window.getPlatform.useQuery();
 	const isMac = platform === "darwin";
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
 
 	return (
 		<>
 			{SECTION_GROUPS.map((group, groupIndex) => {
-				const platformItems = group.items.filter(
-					(item) => !item.macOnly || isMac,
-				);
+				const platformItems = group.items.filter((item) => {
+					if (item.macOnly && !isMac) return false;
+					if (item.hiddenWhenLocalOnly && isFactoryLocalOnly) return false;
+					return true;
+				});
 				const filteredItems = matchCounts
 					? platformItems.filter((item) => (matchCounts[item.section] ?? 0) > 0)
 					: platformItems;

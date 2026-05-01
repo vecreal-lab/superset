@@ -95,7 +95,7 @@ export function useMigrateV1DataToV2({
 	const runMigration = useCallback(
 		async ({ manual }: { manual: boolean }): Promise<MigrationRunResult> => {
 			if (!isV2CloudEnabled) {
-				return { completed: false, reason: "Superset v2 is not enabled" };
+				return { completed: false, reason: "Software Factory v2 is not enabled" };
 			}
 			if (!organizationId) {
 				return { completed: false, reason: "No active organization" };

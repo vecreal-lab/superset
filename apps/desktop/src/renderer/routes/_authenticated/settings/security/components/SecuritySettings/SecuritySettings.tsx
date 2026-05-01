@@ -3,6 +3,7 @@ import { toast } from "@superset/ui/sonner";
 import { Switch } from "@superset/ui/switch";
 import { useState } from "react";
 import { GATED_FEATURES, usePaywall } from "renderer/components/Paywall";
+import { env } from "renderer/env.renderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	isItemVisible,
@@ -16,10 +17,13 @@ interface SecuritySettingsProps {
 }
 
 export function SecuritySettings({ visibleItems }: SecuritySettingsProps) {
-	const showRelayToggle = isItemVisible(
-		SETTING_ITEM_ID.SECURITY_EXPOSE_HOST_SERVICE_VIA_RELAY,
-		visibleItems,
-	);
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
+	const showRelayToggle =
+		!isFactoryLocalOnly &&
+		isItemVisible(
+			SETTING_ITEM_ID.SECURITY_EXPOSE_HOST_SERVICE_VIA_RELAY,
+			visibleItems,
+		);
 
 	const utils = electronTrpc.useUtils();
 	const { data: exposeEnabled, isLoading } =
@@ -94,8 +98,8 @@ export function SecuritySettings({ visibleItems }: SecuritySettingsProps) {
 						</Label>
 						<p className="text-xs text-muted-foreground">
 							When off, your local tools and files cannot be reached from any
-							remote workspace through the Superset relay. This does not affect
-							your ability to connect out to remote sandboxes from this device.
+							remote workspace through the remote relay. This does not affect your
+							ability to connect out to remote sandboxes from this device.
 						</p>
 					</div>
 					<Switch
@@ -107,16 +111,18 @@ export function SecuritySettings({ visibleItems }: SecuritySettingsProps) {
 				</div>
 			)}
 
-			<ExposeViaRelayConfirmDialog
-				open={confirmOpen}
-				targetEnabled={confirmTargetEnabled}
-				onOpenChange={setConfirmOpen}
-				onConfirm={() => {
-					const enabled = confirmTargetEnabled;
-					setConfirmOpen(false);
-					runToggle(enabled);
-				}}
-			/>
+			{!isFactoryLocalOnly && (
+				<ExposeViaRelayConfirmDialog
+					open={confirmOpen}
+					targetEnabled={confirmTargetEnabled}
+					onOpenChange={setConfirmOpen}
+					onConfirm={() => {
+						const enabled = confirmTargetEnabled;
+						setConfirmOpen(false);
+						runToggle(enabled);
+					}}
+				/>
+			)}
 		</div>
 	);
 }

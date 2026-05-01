@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { useEffect } from "react";
 import { useHotkeys } from "react-hotkeys-hook";
+import { env } from "renderer/env.renderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	type SettingsSection,
@@ -107,6 +108,7 @@ function SettingsLayout() {
 	const navigate = useNavigate();
 	const normalizedSearchQuery = searchQuery.trim();
 	const isSearchActive = normalizedSearchQuery.length > 0;
+	const isFactoryLocalOnly = env.FACTORY_LOCAL_ONLY === "true";
 	const totalMatches = isSearchActive
 		? searchSettings(normalizedSearchQuery).length
 		: 0;
@@ -124,14 +126,31 @@ function SettingsLayout() {
 		const currentHasMatches = (matchCounts[currentSection] ?? 0) > 0;
 
 		if (!currentHasMatches) {
-			const firstMatch = SECTION_ORDER.find(
-				(section) => (matchCounts[section] ?? 0) > 0,
-			);
+			const firstMatch = SECTION_ORDER.find((section) => {
+				if (
+					isFactoryLocalOnly &&
+					(section === "integrations" ||
+						section === "billing" ||
+						section === "apikeys" ||
+						section === "account" ||
+						section === "organization" ||
+						section === "experimental")
+				) {
+					return false;
+				}
+				return (matchCounts[section] ?? 0) > 0;
+			});
 			if (firstMatch) {
 				navigate({ to: getPathFromSection(firstMatch), replace: true });
 			}
 		}
-	}, [isSearchActive, location.pathname, navigate, normalizedSearchQuery]);
+	}, [
+		isFactoryLocalOnly,
+		isSearchActive,
+		location.pathname,
+		navigate,
+		normalizedSearchQuery,
+	]);
 
 	useHotkeys(
 		"escape",

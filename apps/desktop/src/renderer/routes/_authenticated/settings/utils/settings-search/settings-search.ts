@@ -413,7 +413,7 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 		id: SETTING_ITEM_ID.BEHAVIOR_TELEMETRY,
 		section: "behavior",
 		title: "Send anonymous usage data",
-		description: "Help improve Superset by sending anonymous usage data",
+		description: "Help improve Software Factory by sending anonymous usage data",
 		keywords: [
 			"telemetry",
 			"analytics",
@@ -714,8 +714,8 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 	{
 		id: SETTING_ITEM_ID.EXPERIMENTAL_SUPERSET_V2,
 		section: "experimental",
-		title: "Try Superset Version 2 (Early Access)",
-		description: "Switch between Superset V1 and the new V2 experience",
+		title: "Try Software Factory Version 2 (Early Access)",
+		description: "Switch between Software Factory V1 and the new V2 experience",
 		keywords: [
 			"experimental",
 			"experiments",
@@ -934,7 +934,7 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 		id: SETTING_ITEM_ID.PROJECT_IMPORT_WORKTREES,
 		section: "project",
 		title: "Import Worktrees",
-		description: "Import existing worktrees from disk into Superset",
+		description: "Import existing worktrees from disk into Software Factory",
 		keywords: [
 			"project",
 			"import",
@@ -1089,7 +1089,7 @@ export const SETTINGS_ITEMS: SettingsItem[] = [
 		section: "security",
 		title: "Allow remote workspaces to access this device via relay",
 		description:
-			"Controls whether remote workspaces can reach your local host service through the Superset relay",
+			"Controls whether remote workspaces can reach your local host service through the remote relay",
 		keywords: [
 			"security",
 			"relay",

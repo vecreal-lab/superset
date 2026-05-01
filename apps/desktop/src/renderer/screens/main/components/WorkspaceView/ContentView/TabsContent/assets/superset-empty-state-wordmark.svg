@@ -1,13 +1,9 @@
-<svg width="145" height="60" viewBox="0 0 145 60" fill="none" xmlns="http://www.w3.org/2000/svg">
-<g clip-path="url(#clip0_48_868)">
-<path d="M125 0H115V10H125V20H135V30V40H125V50H115V60H125H135V50V40H145V30V20H135V10V0H125Z" fill="#EAE8E6"/>
-<path d="M20 0H30V10H20V20H10V30V40H20V50H30V60H20H10V50V40H0V30V20H10V10V0H20Z" fill="#EAE8E6"/>
-<path d="M89.9999 0H79.9999V10H89.9999V20H99.9999V30V40H89.9999V50H79.9999V60H89.9999H99.9999V50V40H110V30V20H99.9999V10V0H89.9999Z" fill="#EAE8E6"/>
-<path d="M54.9999 0H64.9999V10H54.9999V20H44.9999V30V40H54.9999V50H64.9999V60H54.9999H44.9999V50V40H34.9999V30V20H44.9999V10V0H54.9999Z" fill="#EAE8E6"/>
-</g>
-<defs>
-<clipPath id="clip0_48_868">
-<rect width="145" height="60" fill="white"/>
-</clipPath>
-</defs>
+<svg width="184" height="44" viewBox="0 0 184 44" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Software Factory">
+<rect x="2" y="2" width="40" height="40" rx="10" fill="#111827" stroke="#A7F3D0" stroke-width="2"/>
+<rect x="12" y="12" width="8" height="8" rx="2" fill="#A7F3D0"/>
+<rect x="24" y="12" width="8" height="8" rx="2" fill="#60A5FA"/>
+<rect x="12" y="24" width="8" height="8" rx="2" fill="#FBBF24"/>
+<path d="M24 28h8" stroke="#E5E7EB" stroke-width="3" stroke-linecap="round"/>
+<text x="54" y="20" fill="#E5E7EB" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Software</text>
+<text x="54" y="35" fill="#A7F3D0" font-family="Inter, Arial, sans-serif" font-size="14" font-weight="700">Factory</text>
 </svg>

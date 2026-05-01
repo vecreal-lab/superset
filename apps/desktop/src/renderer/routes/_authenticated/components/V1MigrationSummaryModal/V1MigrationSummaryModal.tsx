@@ -170,7 +170,7 @@ export function V1MigrationSummaryModal() {
 			>
 				<DialogTitle className="sr-only">
 					{page === "welcome"
-						? "Welcome to Superset v2"
+						? "Welcome to Software Factory v2"
 						: "V1 migration results"}
 				</DialogTitle>
 				<DialogDescription className="sr-only">
@@ -235,7 +235,7 @@ function WelcomePage() {
 			<div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_35%,rgba(255,255,255,0.14),transparent_34%),linear-gradient(to_bottom,rgba(0,0,0,0.04),rgba(0,0,0,0.5))]" />
 			<div className="absolute inset-0 flex flex-col items-center justify-center px-14 text-center">
 				<div className="text-3xl font-semibold text-white">
-					Welcome to Superset v2
+					Welcome to Software Factory v2
 				</div>
 			</div>
 		</div>
@@ -461,7 +461,7 @@ function countByStatus<T extends { status: string }>(
 
 function buildMigrationSupportReport(summary: MigrationSummary): string {
 	const lines = [
-		"Hi Superset team,",
+		"Hi Software Factory team,",
 		"",
 		"I ran into an issue with the V1 to V2 migration.",
 		"",

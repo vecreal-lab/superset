@@ -212,7 +212,7 @@ async function updateTrayMenu(): Promise<void> {
 		},
 		{ type: "separator" },
 		{
-			label: "Open Superset",
+			label: "Open Software Factory",
 			click: focusMainWindow,
 		},
 		{
@@ -229,7 +229,7 @@ async function updateTrayMenu(): Promise<void> {
 		},
 		{ type: "separator" },
 		{
-			label: "Quit Superset",
+			label: "Quit Software Factory",
 			click: () => quitApp(),
 		},
 	]);
@@ -256,7 +256,7 @@ export function initTray(): void {
 		}
 
 		tray = new Tray(icon);
-		tray.setToolTip("Superset");
+		tray.setToolTip("Software Factory");
 
 		void updateTrayMenu();
 

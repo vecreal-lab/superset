@@ -12,35 +12,38 @@ export const PROTOCOL_SCHEMES = {
 
 // Company
 export const COMPANY = {
-	NAME: "Superset",
-	DOMAIN: "superset.sh",
-	EMAIL_DOMAIN: "@superset.sh",
-	GITHUB_URL: "https://github.com/superset-sh/superset",
-	DOCS_URL: process.env.NEXT_PUBLIC_DOCS_URL || "https://docs.superset.sh",
-	MARKETING_URL: process.env.NEXT_PUBLIC_MARKETING_URL || "https://superset.sh",
-	TERMS_URL: `${process.env.NEXT_PUBLIC_MARKETING_URL || "https://superset.sh"}/terms`,
+	NAME: "Software Factory",
+	DOMAIN: "vecreal.com",
+	EMAIL_DOMAIN: "@vecreal.com",
+	GITHUB_URL: "https://github.com/vecreal-lab/superset",
+	DOCS_URL:
+		process.env.NEXT_PUBLIC_DOCS_URL ||
+		"https://vecreal.com/software-factory/docs",
+	MARKETING_URL:
+		process.env.NEXT_PUBLIC_MARKETING_URL || "https://vecreal.com",
+	TERMS_URL: `${process.env.NEXT_PUBLIC_MARKETING_URL || "https://vecreal.com"}/terms`,
 	PRIVACY_URL:
-		(process.env.NEXT_PUBLIC_MARKETING_URL || "https://superset.sh") +
+		(process.env.NEXT_PUBLIC_MARKETING_URL || "https://vecreal.com") +
 		"/privacy",
 	CHANGELOG_URL:
-		(process.env.NEXT_PUBLIC_MARKETING_URL || "https://superset.sh") +
+		(process.env.NEXT_PUBLIC_MARKETING_URL || "https://vecreal.com") +
 		"/changelog",
-	X_URL: "https://x.com/superset_sh",
-	LINKEDIN_URL: "https://www.linkedin.com/company/superset-sh",
-	YOUTUBE_URL: "https://www.youtube.com/@superset-sh",
-	MAIL_TO: "mailto:founders@superset.sh",
-	REPORT_ISSUE_URL: "https://github.com/superset-sh/superset/issues/new",
-	DISCORD_URL: "https://discord.gg/cZeD9WYcV7",
-	STATUS_URL: "https://status.superset.sh",
-	TRUST_URL: "https://trust.superset.sh",
-	CAREERS_URL: "https://www.ycombinator.com/companies/superset/jobs",
+	X_URL: "https://vecreal.com",
+	LINKEDIN_URL: "https://vecreal.com",
+	YOUTUBE_URL: "https://vecreal.com",
+	MAIL_TO: "mailto:admin@vecreal.com",
+	REPORT_ISSUE_URL: "https://github.com/vecreal-lab/superset/issues/new",
+	DISCORD_URL: "https://vecreal.com",
+	STATUS_URL: "https://vecreal.com/status",
+	TRUST_URL: "https://vecreal.com/trust",
+	CAREERS_URL: "https://vecreal.com",
 } as const;
 
 // Theme
 export const THEME_STORAGE_KEY = "superset-theme";
 
 // Download URLs
-export const DOWNLOAD_URL_MAC_ARM64 = `${COMPANY.GITHUB_URL}/releases/latest/download/Superset-arm64.dmg`;
+export const DOWNLOAD_URL_MAC_ARM64 = `${COMPANY.GITHUB_URL}/releases/latest/download/Software-Factory-arm64.dmg`;
 
 // Auth token configuration
 export const TOKEN_CONFIG = {
