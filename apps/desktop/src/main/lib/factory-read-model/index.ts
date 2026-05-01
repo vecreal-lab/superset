@@ -12,6 +12,7 @@ export const FACTORY_DATASETS = [
 	"prompts",
 	"approvals",
 	"lessons",
+	"projects",
 ] as const;
 
 export type FactoryDataset = (typeof FACTORY_DATASETS)[number];
@@ -92,6 +93,7 @@ const EMPTY_INDEX: FactoryIndex = {
 	prompts: [],
 	approvals: [],
 	lessons: [],
+	projects: [],
 };
 
 const WATCH_RELATIVE_PATHS = [
@@ -353,6 +355,56 @@ async function parseMarkdownRow(
 	}
 }
 
+function firstMarkdownParagraph(raw: string): string {
+	const lines = raw
+		.split(/\r?\n/)
+		.map((line) => line.trim())
+		.filter(
+			(line) =>
+				line &&
+				!line.startsWith("#") &&
+				!line.toLowerCase().startsWith("status:"),
+		);
+	return lines[0] || "";
+}
+
+async function parseDecisionMarkdownRow(
+	root: string,
+	filePath: string,
+	fallbackId: string,
+): Promise<FactoryRow> {
+	const modifiedAt = await fileModifiedAt(filePath);
+	try {
+		const raw = await readTextFile(filePath);
+		const status = raw.match(/^Status:\s*(.+)$/im)?.[1]?.trim() || "accepted";
+		const projectMatch = normalizeSlashes(filePath).match(/\/projects\/([^/]+)\//);
+		return createRow({
+			root,
+			filePath,
+			id: fallbackId,
+			title: parseMarkdownTitle(raw, fallbackId),
+			status,
+			modifiedAt,
+			data: {
+				project_id: projectMatch?.[1] || "shared",
+				summary: firstMarkdownParagraph(raw) || null,
+				source_type: "decision_file",
+			},
+		});
+	} catch (error) {
+		return createRow({
+			root,
+			filePath,
+			id: fallbackId,
+			title: fallbackId,
+			status: null,
+			parseStatus: "error",
+			qualityFlags: [error instanceof Error ? error.message : String(error)],
+			modifiedAt,
+		});
+	}
+}
+
 async function collectWorkOrders(root: string): Promise<FactoryRow[]> {
 	const files = await walkFiles(root, "work-orders", [".yml", ".yaml"]);
 	return Promise.all(
@@ -553,15 +605,52 @@ async function collectDecisions(root: string): Promise<FactoryRow[]> {
 		(filePath) => normalizeSlashes(filePath).includes("/decisions/"),
 	);
 	const files = [...new Set([...rootDecisions, ...projectDecisions])];
-	return Promise.all(
+	const decisionFiles = await Promise.all(
 		files.map((filePath) =>
-			parseMarkdownRow(
+			parseDecisionMarkdownRow(
 				root,
 				filePath,
 				relativePath(root, filePath).replace(/\.md$/, ""),
 			),
 		),
 	);
+	const proposalRows = await collectDecisionProposals(root);
+	return [...decisionFiles, ...proposalRows];
+}
+
+async function collectDecisionProposals(root: string): Promise<FactoryRow[]> {
+	const files = await walkFiles(root, "work-orders", [".yml", ".yaml"]);
+	const rows: FactoryRow[] = [];
+	for (const filePath of files) {
+		const raw = await readTextFile(filePath);
+		if (!raw.includes("decisions_proposed")) continue;
+		const parsed = parseShallowYaml(raw);
+		const modifiedAt = await fileModifiedAt(filePath);
+		const workOrderId = parsed.id || path.basename(filePath, path.extname(filePath));
+		const decisionBlocks = raw.split(/\n\s*-\s+id:\s*/).slice(1);
+		for (const block of decisionBlocks) {
+			const id = block.split(/\r?\n/, 1)[0]?.trim();
+			if (!id || !block.includes("summary:")) continue;
+			const summary = block.match(/^\s*summary:\s*(.+)$/m)?.[1]?.trim() || "";
+			rows.push(
+				createRow({
+					root,
+					filePath,
+					id,
+					title: id,
+					status: "proposed",
+					modifiedAt,
+					data: {
+						project_id: parsed.project_id || "shared",
+						work_order_id: workOrderId,
+						summary,
+						source_type: "work_order_decision_contract",
+					},
+				}),
+			);
+		}
+	}
+	return rows;
 }
 
 async function collectLessons(root: string): Promise<FactoryRow[]> {
@@ -617,6 +706,78 @@ async function collectRoles(root: string): Promise<FactoryRow[]> {
 					model: parsed.model || null,
 					runtime: parsed.runtime || null,
 					reasoning_level: parsed.reasoning_level || null,
+					purpose: parsed.purpose || null,
+					what_it_owns: parsed.what_it_owns || null,
+					must_verify: parsed.must_verify || null,
+					sends_back_when: parsed.sends_back_when || null,
+					escalates_when: parsed.escalates_when || null,
+					activation_contexts: parsed.activation_contexts || null,
+					allowed_tools: parsed.allowed_tools || null,
+					prompt_path:
+						parsed.prompt_path ||
+						(existsSync(
+							path.join(
+								root,
+								"templates",
+								"role-prompts",
+								`${stripYamlScalar(id)}.md`,
+							),
+						)
+							? `templates/role-prompts/${stripYamlScalar(id)}.md`
+							: null),
+				},
+			}),
+		);
+	}
+	return rows;
+}
+
+async function collectProjects(root: string): Promise<FactoryRow[]> {
+	const projectsRoot = path.join(root, "projects");
+	if (!existsSync(projectsRoot)) return [];
+	const entries = await readdir(projectsRoot, { withFileTypes: true });
+	const rows: FactoryRow[] = [];
+	for (const entry of entries) {
+		if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
+		const projectId = entry.name;
+		const pipelinePath = path.join(projectsRoot, projectId, "project-pipeline.yml");
+		if (!existsSync(pipelinePath)) continue;
+		const modifiedAt = await fileModifiedAt(pipelinePath);
+		const raw = await readTextFile(pipelinePath);
+		const parsed = parseShallowYaml(raw);
+		const foundationIdentity = path.join(
+			projectsRoot,
+			projectId,
+			"foundations",
+			"identity.md",
+		);
+		const rootIdentity = path.join(projectsRoot, projectId, "identity.md");
+		const identityPath = existsSync(foundationIdentity)
+			? foundationIdentity
+			: existsSync(rootIdentity)
+				? rootIdentity
+				: null;
+		let identitySummary: string | null = null;
+		if (identityPath) {
+			try {
+				identitySummary = firstMarkdownParagraph(await readTextFile(identityPath));
+			} catch {
+				identitySummary = null;
+			}
+		}
+		rows.push(
+			createRow({
+				root,
+				filePath: pipelinePath,
+				id: projectId,
+				title: parsed.name || projectId,
+				status: parsed.status || "active",
+				modifiedAt,
+				data: {
+					project_id: projectId,
+					identity_summary: identitySummary,
+					identity_path: identityPath ? relativePath(root, identityPath) : null,
+					hierarchy_mode: "flat_until_WO-B17",
 				},
 			}),
 		);
@@ -987,6 +1148,7 @@ export class FactoryReadModel {
 			next.prompts,
 			next.approvals,
 			next.lessons,
+			next.projects,
 		] = await Promise.all([
 			collectWorkOrders(this.root),
 			collectRuns(this.root),
@@ -997,6 +1159,7 @@ export class FactoryReadModel {
 			collectPrompts(this.root),
 			collectApprovals(this.root),
 			collectLessons(this.root),
+			collectProjects(this.root),
 		]);
 		this.index = next;
 		this.lastIndexedAt = new Date().toISOString();
