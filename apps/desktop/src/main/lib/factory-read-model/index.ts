@@ -172,6 +172,54 @@ function parseShallowYaml(raw: string): Record<string, string> {
 	return result;
 }
 
+interface ProjectHierarchyNode {
+	id: string;
+	label?: string;
+	node_type?: string;
+	project_id?: string;
+	parent_id?: string;
+	status?: string;
+	sort_order?: string;
+	summary?: string;
+	source_path?: string;
+}
+
+function parseProjectHierarchy(raw: string): ProjectHierarchyNode[] {
+	const nodes: ProjectHierarchyNode[] = [];
+	let current: ProjectHierarchyNode | null = null;
+
+	for (const line of raw.split(/\r?\n/)) {
+		const item = /^\s*-\s+id:\s*(.*)$/.exec(line);
+		if (item) {
+			current = { id: stripYamlScalar(item[1] || "") };
+			if (current.id) nodes.push(current);
+			continue;
+		}
+
+		const property = /^\s{4}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+		if (!current || !property) continue;
+		const [, key, value] = property;
+		if (!key) continue;
+		current[key as keyof ProjectHierarchyNode] = stripYamlScalar(value || "");
+	}
+
+	return nodes.filter((node) => node.id);
+}
+
+function getHierarchyPath(
+	node: ProjectHierarchyNode,
+	byId: Map<string, ProjectHierarchyNode>,
+	visiting = new Set<string>(),
+): string[] {
+	if (visiting.has(node.id)) return [node.id];
+	visiting.add(node.id);
+	const parentId = node.parent_id || "";
+	if (!parentId) return [node.id];
+	const parent = byId.get(parentId);
+	if (!parent) return [node.id];
+	return [...getHierarchyPath(parent, byId, visiting), node.id];
+}
+
 function parseMarkdownTitle(raw: string, fallback: string): string {
 	const heading = raw.match(/^#\s+(.+)$/m)?.[1]?.trim();
 	return heading || fallback;
@@ -736,7 +784,17 @@ async function collectProjects(root: string): Promise<FactoryRow[]> {
 	const projectsRoot = path.join(root, "projects");
 	if (!existsSync(projectsRoot)) return [];
 	const entries = await readdir(projectsRoot, { withFileTypes: true });
-	const rows: FactoryRow[] = [];
+	const projectInfos = new Map<
+		string,
+		{
+			projectId: string;
+			pipelinePath: string;
+			modifiedAt: string | null;
+			parsed: Record<string, string>;
+			identityPath: string | null;
+			identitySummary: string | null;
+		}
+	>();
 	for (const entry of entries) {
 		if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
 		const projectId = entry.name;
@@ -765,19 +823,106 @@ async function collectProjects(root: string): Promise<FactoryRow[]> {
 				identitySummary = null;
 			}
 		}
+		projectInfos.set(projectId, {
+			projectId,
+			pipelinePath,
+			modifiedAt,
+			parsed,
+			identityPath,
+			identitySummary,
+		});
+	}
+
+	const hierarchyPath = path.join(projectsRoot, "project-hierarchy.yml");
+	const hierarchyNodes = existsSync(hierarchyPath)
+		? parseProjectHierarchy(await readTextFile(hierarchyPath))
+		: [];
+	const hierarchyById = new Map(hierarchyNodes.map((node) => [node.id, node]));
+	const hierarchyByProjectId = new Map(
+		hierarchyNodes
+			.filter((node) => node.project_id)
+			.map((node) => [node.project_id || "", node]),
+	);
+	const rows: FactoryRow[] = [];
+	const usedProjectIds = new Set<string>();
+
+	for (const node of hierarchyNodes) {
+		const projectInfo = node.project_id
+			? projectInfos.get(node.project_id)
+			: undefined;
+		const hierarchyParts = getHierarchyPath(node, hierarchyById);
+		const sourcePath = projectInfo
+			? projectInfo.pipelinePath
+			: node.source_path
+				? path.join(root, node.source_path)
+				: hierarchyPath;
+		const filePath = existsSync(sourcePath) ? sourcePath : hierarchyPath;
+		if (projectInfo?.projectId) usedProjectIds.add(projectInfo.projectId);
+
 		rows.push(
 			createRow({
 				root,
-				filePath: pipelinePath,
-				id: projectId,
-				title: parsed.name || projectId,
-				status: parsed.status || "active",
-				modifiedAt,
+				filePath,
+				id: node.id,
+				title: node.label || projectInfo?.parsed.name || node.id,
+				status: node.status || projectInfo?.parsed.status || "active",
+				modifiedAt: projectInfo?.modifiedAt || (await fileModifiedAt(filePath)),
 				data: {
-					project_id: projectId,
-					identity_summary: identitySummary,
-					identity_path: identityPath ? relativePath(root, identityPath) : null,
-					hierarchy_mode: "flat_until_WO-B17",
+					project_id: projectInfo?.projectId || node.project_id || null,
+					identity_summary: projectInfo?.identitySummary || node.summary || null,
+					identity_path: projectInfo?.identityPath
+						? relativePath(root, projectInfo.identityPath)
+						: null,
+					node_type: node.node_type || projectInfo?.parsed.hierarchy_node_type || "project",
+					parent_id: node.parent_id || null,
+					tree_depth: Math.max(0, hierarchyParts.length - 1),
+					tree_path: hierarchyParts.join("/"),
+					display_order: Number(node.sort_order || "1000"),
+					summary: node.summary || null,
+					hierarchy_source_path: relativePath(root, hierarchyPath),
+					hierarchy_mode: "canonical",
+				},
+			}),
+		);
+	}
+
+	for (const projectInfo of projectInfos.values()) {
+		if (usedProjectIds.has(projectInfo.projectId)) continue;
+		const node = hierarchyByProjectId.get(projectInfo.projectId);
+		const parentId = projectInfo.parsed.hierarchy_parent_id || node?.parent_id || "";
+		rows.push(
+			createRow({
+				root,
+				filePath: projectInfo.pipelinePath,
+				id: projectInfo.parsed.hierarchy_node_id || projectInfo.projectId,
+				title: projectInfo.parsed.name || projectInfo.projectId,
+				status: projectInfo.parsed.status || "active",
+				modifiedAt: projectInfo.modifiedAt,
+				data: {
+					project_id: projectInfo.projectId,
+					identity_summary: projectInfo.identitySummary,
+					identity_path: projectInfo.identityPath
+						? relativePath(root, projectInfo.identityPath)
+						: null,
+					node_type: projectInfo.parsed.hierarchy_node_type || "project",
+					parent_id: parentId || null,
+					tree_depth: projectInfo.parsed.hierarchy_tree_path
+						? projectInfo.parsed.hierarchy_tree_path.split("/").length - 1
+						: 0,
+					tree_path:
+						projectInfo.parsed.hierarchy_tree_path ||
+						projectInfo.parsed.hierarchy_node_id ||
+						projectInfo.projectId,
+					display_order: Number(
+						projectInfo.parsed.hierarchy_display_order || "1000",
+					),
+					summary: null,
+					hierarchy_source_path: existsSync(hierarchyPath)
+						? relativePath(root, hierarchyPath)
+						: null,
+					hierarchy_mode: existsSync(hierarchyPath)
+						? "canonical_unlisted_project"
+						: "pipeline_fallback",
 				},
 			}),
 		);

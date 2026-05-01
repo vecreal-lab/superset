@@ -8,7 +8,7 @@ import {
 	TableRow,
 } from "@superset/ui/table";
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	DocumentSheet,
@@ -32,6 +32,47 @@ function countForProject(rows: FactoryRow[], projectId: string): number {
 	).length;
 }
 
+type ProjectTreeNode = FactoryRow & { children: ProjectTreeNode[] };
+
+function dataString(row: FactoryRow, key: string): string | null {
+	const value = row.data[key];
+	return typeof value === "string" && value ? value : null;
+}
+
+function dataNumber(row: FactoryRow, key: string): number {
+	const value = row.data[key];
+	return typeof value === "number" ? value : Number(value || 1000);
+}
+
+function projectIdFor(row: FactoryRow): string | null {
+	return dataString(row, "project_id");
+}
+
+function buildProjectTree(rows: FactoryRow[]): ProjectTreeNode[] {
+	const nodes = new Map<string, ProjectTreeNode>();
+	for (const row of rows) {
+		nodes.set(row.id, { ...row, children: [] });
+	}
+
+	const roots: ProjectTreeNode[] = [];
+	for (const node of nodes.values()) {
+		const parentId = dataString(node, "parent_id");
+		const parent = parentId ? nodes.get(parentId) : null;
+		if (parent) parent.children.push(node);
+		else roots.push(node);
+	}
+
+	const sortNodes = (items: ProjectTreeNode[]) => {
+		items.sort((a, b) => {
+			const order = dataNumber(a, "display_order") - dataNumber(b, "display_order");
+			return order || a.title.localeCompare(b.title);
+		});
+		for (const item of items) sortNodes(item.children);
+	};
+	sortNodes(roots);
+	return roots;
+}
+
 function ProjectsPage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const projects = electronTrpc.factory.dataset.useQuery(
@@ -46,77 +87,92 @@ function ProjectsPage() {
 		{ dataset: "runs" },
 		{ refetchInterval: 5000 },
 	);
-	const rows = useMemo(
-		() =>
-			(projects.data || []).sort((a: FactoryRow, b: FactoryRow) =>
-				a.id.localeCompare(b.id),
-			),
-		[projects.data],
-	);
+	const rows = useMemo(() => buildProjectTree(projects.data || []), [projects.data]);
+
+	const renderRows = (nodes: ProjectTreeNode[], depth = 0): ReactNode[] =>
+		nodes.flatMap((row) => {
+			const projectId = projectIdFor(row);
+			const nodeType = dataString(row, "node_type") || "project";
+			const summary =
+				dataString(row, "identity_summary") ||
+				dataString(row, "summary") ||
+				"Project identity or hierarchy summary not authored yet.";
+			const hierarchySource = dataString(row, "hierarchy_source_path");
+			return [
+				<TableRow key={row.id}>
+					<TableCell>
+						<div
+							className="min-w-0"
+							style={{ paddingLeft: `${Math.max(0, depth) * 1.25}rem` }}
+						>
+							<div className="flex items-center gap-2">
+								<div className="font-medium">{row.title}</div>
+								<Badge variant="outline">{nodeType}</Badge>
+							</div>
+							<div className="font-mono text-xs text-muted-foreground">
+								{row.id}
+							</div>
+						</div>
+					</TableCell>
+					<TableCell>
+						<Badge variant="outline">{row.status || "active"}</Badge>
+					</TableCell>
+					<TableCell className="max-w-xl whitespace-normal text-sm">
+						{summary}
+						{typeof row.data.identity_path === "string" && (
+							<div className="mt-1">
+								<SourceButton path={row.data.identity_path} onOpen={setSelectedSource}>
+									Identity foundation
+								</SourceButton>
+							</div>
+						)}
+					</TableCell>
+					<TableCell>
+						{projectId ? countForProject(workOrders.data || [], projectId) : "n/a"}
+					</TableCell>
+					<TableCell>{projectId ? countForProject(runs.data || [], projectId) : "n/a"}</TableCell>
+					<TableCell className="max-w-sm">
+						<SourceButton path={row.source_relative_path} onOpen={setSelectedSource} />
+						{hierarchySource && hierarchySource !== row.source_relative_path && (
+							<div>
+								<SourceButton path={hierarchySource} onOpen={setSelectedSource}>
+									Hierarchy source
+								</SourceButton>
+							</div>
+						)}
+					</TableCell>
+				</TableRow>,
+				...renderRows(row.children, depth + 1),
+			];
+		});
 
 	return (
 		<FactoryPage
 			title="Project Hierarchy"
-			description="Factory projects shown as a flat list until WO-B17 installs parent/child hierarchy policy."
+			description="Organization and project tree from projects/project-hierarchy.yml, enriched with project pipeline and identity artifacts."
 		>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-				<div className="mb-4">
+				{rows.length === 0 && (
 					<EmptyFactoryState
-						title="Hierarchy policy pending"
-						body="Project hierarchy structure lands with WO-B17. Until then, Software Factory and Construction PM show as flat project nodes."
-						sourcePath="projects/_shared/foundations/project-initiation-policy.md"
+						title="No project hierarchy found"
+						body="Add projects/project-hierarchy.yml and project-pipeline hierarchy metadata to render the factory project tree."
+						sourcePath="projects/_shared/foundations/project-hierarchy-policy.md"
 						onOpenSource={setSelectedSource}
 					/>
-				</div>
+				)}
 				<Table>
 					<TableHeader>
 						<TableRow>
-							<TableHead>Project</TableHead>
+							<TableHead>Hierarchy</TableHead>
 							<TableHead>Status</TableHead>
-							<TableHead>Identity</TableHead>
+							<TableHead>Identity / summary</TableHead>
 							<TableHead>Work orders</TableHead>
 							<TableHead>Recent runs</TableHead>
 							<TableHead>Source</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
-						{rows.map((row: FactoryRow) => (
-							<TableRow key={row.id}>
-								<TableCell>
-									<div className="font-medium">{row.title}</div>
-									<div className="font-mono text-xs text-muted-foreground">
-										{row.id}
-									</div>
-								</TableCell>
-								<TableCell>
-									<Badge variant="outline">{row.status || "active"}</Badge>
-								</TableCell>
-								<TableCell className="max-w-xl whitespace-normal text-sm">
-									{typeof row.data.identity_summary === "string" &&
-									row.data.identity_summary
-										? row.data.identity_summary
-										: "Identity foundation not authored yet."}
-									{typeof row.data.identity_path === "string" && (
-										<div className="mt-1">
-											<SourceButton
-												path={row.data.identity_path}
-												onOpen={setSelectedSource}
-											>
-												Identity foundation
-											</SourceButton>
-										</div>
-									)}
-								</TableCell>
-								<TableCell>{countForProject(workOrders.data || [], row.id)}</TableCell>
-								<TableCell>{countForProject(runs.data || [], row.id)}</TableCell>
-								<TableCell className="max-w-sm">
-									<SourceButton
-										path={row.source_relative_path}
-										onOpen={setSelectedSource}
-									/>
-								</TableCell>
-							</TableRow>
-						))}
+						{renderRows(rows)}
 					</TableBody>
 				</Table>
 			</div>
