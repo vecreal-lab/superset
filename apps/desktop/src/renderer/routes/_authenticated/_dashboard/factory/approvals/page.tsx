@@ -9,16 +9,19 @@ import {
 	TableRow,
 } from "@superset/ui/table";
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { MarkdownRenderer } from "renderer/components/MarkdownRenderer/MarkdownRenderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	FactoryPage,
 	FactoryTextarea,
 	SourceButton,
 	WorkOrderLink,
+	rowMatchesProject,
 	type FactoryDocumentReference,
+	type FactoryRow,
 } from "../components/FactoryView";
 
 export const Route = createFileRoute(
@@ -44,10 +47,15 @@ interface PendingApproval {
 function ApprovalsPage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const [notesById, setNotesById] = useState<Record<string, string>>({});
+	const activeProjectId = useActiveProjectId();
 	const utils = electronTrpc.useUtils();
 	const approvals = electronTrpc.factory.pendingApprovals.useQuery(undefined, {
 		refetchInterval: 5000,
 	});
+	const workOrders = electronTrpc.factory.dataset.useQuery(
+		{ dataset: "work_orders" },
+		{ refetchInterval: 5000 },
+	);
 	const writeApproval = electronTrpc.factory.writeApproval.useMutation({
 		onSuccess: async () => {
 			await Promise.all([
@@ -66,14 +74,25 @@ function ApprovalsPage() {
 			notes: notesById[approval.id] || "",
 		});
 	};
+	const activeApprovals = useMemo(() => {
+		const workOrderRows = workOrders.data || [];
+		return (approvals.data || []).filter((approval: PendingApproval) => {
+			const matchingWorkOrder = workOrderRows.find(
+				(row: FactoryRow) => row.id === approval.work_order_id,
+			);
+			return matchingWorkOrder
+				? rowMatchesProject(matchingWorkOrder, activeProjectId)
+				: approval.run_relative_path.includes(activeProjectId);
+		});
+	}, [activeProjectId, approvals.data, workOrders.data]);
 
 	return (
 		<FactoryPage
 			title="Approval Queue"
-			description="Owner-review gates detected from awaiting-review packets. Approve or send back with free-form notes; the cockpit writes the approval YAML."
+			description="Owner-review gates for the active project. Approve or send back with free-form notes; the cockpit writes the approval YAML."
 		>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-				{approvals.data?.length ? (
+				{activeApprovals.length ? (
 					<div className="space-y-6">
 						<Table>
 							<TableHeader>
@@ -86,7 +105,7 @@ function ApprovalsPage() {
 								</TableRow>
 							</TableHeader>
 							<TableBody>
-								{approvals.data.map((approval: PendingApproval) => (
+								{activeApprovals.map((approval: PendingApproval) => (
 									<TableRow key={approval.id}>
 										<TableCell className="max-w-56 whitespace-normal">
 											<WorkOrderLink id={approval.work_order_id} />

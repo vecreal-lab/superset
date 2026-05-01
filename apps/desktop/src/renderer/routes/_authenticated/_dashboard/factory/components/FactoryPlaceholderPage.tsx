@@ -1,4 +1,6 @@
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
+import { rowMatchesProject, type FactoryRow } from "./FactoryView";
 
 type FactoryDataset =
 	| "work_orders"
@@ -22,12 +24,16 @@ export function FactoryPlaceholderPage({
 	description,
 	dataset,
 }: FactoryPlaceholderPageProps) {
+	const activeProjectId = useActiveProjectId();
 	const summary = electronTrpc.factory.summary.useQuery(undefined, {
 		refetchInterval: 5000,
 	});
 	const datasetQuery = electronTrpc.factory.dataset.useQuery(
 		{ dataset: dataset ?? "work_orders" },
 		{ enabled: !!dataset },
+	);
+	const activeRows = (datasetQuery.data || []).filter((row: FactoryRow) =>
+		rowMatchesProject(row, activeProjectId),
 	);
 
 	return (
@@ -65,11 +71,11 @@ export function FactoryPlaceholderPage({
 					</div>
 					<div className="rounded-md border p-4">
 						<div className="text-xs uppercase text-muted-foreground">
-							Rows
+							Active project rows
 						</div>
 						<div className="mt-2 text-sm">
 							{dataset
-								? `${datasetQuery.data?.length ?? 0} ${dataset}`
+								? `${activeRows.length} ${dataset}`
 								: `${summary.data?.counts.work_orders ?? 0} work orders`}
 						</div>
 					</div>

@@ -26,6 +26,8 @@ export type DialogueState = (typeof DIALOGUE_STATES)[number];
 
 export type DialogueMessageKind = "operator" | "agent" | "specialist" | "system";
 
+export const DEFAULT_DIALOGUE_PROJECT_ID = "software-factory";
+
 export interface DialogueMessage {
 	id: string;
 	dialogue_id: string;
@@ -38,6 +40,7 @@ export interface DialogueMessage {
 
 interface DialogueMetadata {
 	id: string;
+	project: string;
 	surface: string;
 	title: string;
 	created_at: string;
@@ -67,6 +70,7 @@ export interface DialogueTurnResult {
 
 export interface DialogueAttentionCounts {
 	total: number;
+	by_project: Record<string, number>;
 	by_surface: Record<string, number>;
 	by_state: Partial<Record<DialogueState, number>>;
 	items: DialogueRecord[];
@@ -125,6 +129,20 @@ function surfaceSegments(surface: string): string[] {
 		.split("/")
 		.map(safeSegment)
 		.filter(Boolean);
+}
+
+function projectSegment(project?: string): string {
+	const rawProject = project?.trim() || DEFAULT_DIALOGUE_PROJECT_ID;
+	if (
+		rawProject.includes("/") ||
+		rawProject.includes("\\") ||
+		rawProject === "." ||
+		rawProject === ".." ||
+		rawProject.includes("..")
+	) {
+		throw new Error(`Dialogue project must be a safe project id: ${rawProject}`);
+	}
+	return safeSegment(rawProject);
 }
 
 function stringifyYaml(entries: Array<readonly [string, string | boolean]>): string {
@@ -210,15 +228,25 @@ export class FactoryDialogueStore {
 		return resolved;
 	}
 
-	private dialogueDir(surface: string, dialogueId: string): string {
+	private dialogueDir(project: string | undefined, surface: string, dialogueId: string): string {
 		const segments = surfaceSegments(surface);
 		return this.resolveInsideDialogues(
-			path.join("runs", "dialogues", ...segments, safeSegment(dialogueId)),
+			path.join(
+				"runs",
+				"dialogues",
+				projectSegment(project),
+				...segments,
+				safeSegment(dialogueId),
+			),
 		);
 	}
 
-	private async ensureDialogueDir(surface: string, dialogueId: string): Promise<string> {
-		const directory = this.dialogueDir(surface, dialogueId);
+	private async ensureDialogueDir(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<string> {
+		const directory = this.dialogueDir(project, surface, dialogueId);
 		await mkdir(directory, { recursive: true });
 		return directory;
 	}
@@ -275,8 +303,15 @@ export class FactoryDialogueStore {
 		const messages = await this.readMessages(directory);
 		const modifiedAt = (await stat(statePath)).mtime.toISOString();
 		const state = String(stateRaw.state || "idle_exploratory") as DialogueState;
+		const relativeParts = normalizeSlashes(path.relative(this.dialoguesRoot, directory))
+			.split("/")
+			.filter(Boolean);
+		const project = String(
+			metadataRaw.project || relativeParts[0] || DEFAULT_DIALOGUE_PROJECT_ID,
+		);
 		return {
 			id: String(metadataRaw.id || path.basename(directory)),
+			project,
 			surface: String(metadataRaw.surface || "unknown"),
 			title: String(metadataRaw.title || "Untitled dialogue"),
 			created_at: String(metadataRaw.created_at || modifiedAt),
@@ -293,17 +328,23 @@ export class FactoryDialogueStore {
 	}
 
 	private async updateDialogueState(
+		project: string | undefined,
 		surface: string,
 		dialogueId: string,
 		state: DialogueState,
 		options: { archived?: boolean; auditEvent?: string } = {},
 	): Promise<DialogueRecord> {
-		const directory = this.dialogueDir(surface, dialogueId);
+		const directory = this.dialogueDir(project, surface, dialogueId);
 		const existing = await this.readDialogue(directory);
-		if (!existing) throw new Error(`Dialogue not found: ${surface}/${dialogueId}`);
+		if (!existing) {
+			throw new Error(
+				`Dialogue not found: ${projectSegment(project)}/${surface}/${dialogueId}`,
+			);
+		}
 		const timestamp = nowIso();
 		const metadata: DialogueMetadata = {
 			id: existing.id,
+			project: existing.project,
 			surface: existing.surface,
 			title: existing.title,
 			created_at: existing.created_at,
@@ -328,16 +369,19 @@ export class FactoryDialogueStore {
 	}
 
 	async startTurn(input: {
+		project?: string;
 		surface: string;
 		message: string;
 		title?: string;
 	}): Promise<DialogueTurnResult> {
 		const dialogueId = randomUUID();
-		const directory = await this.ensureDialogueDir(input.surface, dialogueId);
+		const project = projectSegment(input.project);
+		const directory = await this.ensureDialogueDir(project, input.surface, dialogueId);
 		const timestamp = nowIso();
 		const state = inferNextState(input.message);
 		const metadata: DialogueMetadata = {
 			id: dialogueId,
+			project,
 			surface: input.surface,
 			title: input.title || `Dialogue on ${input.surface}`,
 			created_at: timestamp,
@@ -369,20 +413,30 @@ export class FactoryDialogueStore {
 		};
 		await this.appendMessage(directory, operatorMessage);
 		await this.appendMessage(directory, agentMessage);
-		await this.appendAudit(directory, "dialogue_started", { state, surface: input.surface });
+		await this.appendAudit(directory, "dialogue_started", {
+			project,
+			state,
+			surface: input.surface,
+		});
 		const dialogue = await this.readDialogue(directory);
 		if (!dialogue) throw new Error("Failed to read newly-created dialogue");
 		return { dialogue, messages: [operatorMessage, agentMessage], agent_message: agentMessage };
 	}
 
 	async continueTurn(input: {
+		project?: string;
 		surface: string;
 		dialogueId: string;
 		message: string;
 	}): Promise<DialogueTurnResult> {
-		const directory = this.dialogueDir(input.surface, input.dialogueId);
+		const project = projectSegment(input.project);
+		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
 		const existing = await this.readDialogue(directory);
-		if (!existing) throw new Error(`Dialogue not found: ${input.surface}/${input.dialogueId}`);
+		if (!existing) {
+			throw new Error(
+				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
+			);
+		}
 		const state = inferNextState(input.message);
 		const timestamp = nowIso();
 		const operatorMessage: DialogueMessage = {
@@ -404,7 +458,7 @@ export class FactoryDialogueStore {
 		};
 		await this.appendMessage(directory, operatorMessage);
 		await this.appendMessage(directory, agentMessage);
-		await this.updateDialogueState(input.surface, input.dialogueId, state);
+		await this.updateDialogueState(project, input.surface, input.dialogueId, state);
 		const dialogue = await this.readDialogue(directory);
 		if (!dialogue) throw new Error("Failed to read updated dialogue");
 		const messages = await this.readMessages(directory);
@@ -412,49 +466,72 @@ export class FactoryDialogueStore {
 	}
 
 	async commit(input: {
+		project?: string;
 		surface: string;
 		dialogueId: string;
 		notes?: string;
 	}): Promise<DialogueRecord> {
-		const directory = this.dialogueDir(input.surface, input.dialogueId);
+		const project = projectSegment(input.project);
+		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
 		await this.appendAudit(directory, "commit_requested", {
+			project,
 			notes: input.notes || "",
 			mock_agent: true,
 		});
-		return this.updateDialogueState(input.surface, input.dialogueId, "cascade_pending", {
+		return this.updateDialogueState(project, input.surface, input.dialogueId, "cascade_pending", {
 			auditEvent: "commit_recorded",
 		});
 	}
 
-	async abandon(surface: string, dialogueId: string): Promise<DialogueRecord> {
-		return this.updateDialogueState(surface, dialogueId, "abandoned", {
+	async abandon(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<DialogueRecord> {
+		return this.updateDialogueState(project, surface, dialogueId, "abandoned", {
 			archived: true,
 			auditEvent: "dialogue_abandoned",
 		});
 	}
 
-	async shelve(surface: string, dialogueId: string): Promise<DialogueRecord> {
-		return this.updateDialogueState(surface, dialogueId, "shelved", {
+	async shelve(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<DialogueRecord> {
+		return this.updateDialogueState(project, surface, dialogueId, "shelved", {
 			auditEvent: "dialogue_shelved",
 		});
 	}
 
-	async unshelve(surface: string, dialogueId: string): Promise<DialogueRecord> {
-		return this.updateDialogueState(surface, dialogueId, "idle_exploratory", {
+	async unshelve(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<DialogueRecord> {
+		return this.updateDialogueState(project, surface, dialogueId, "idle_exploratory", {
 			auditEvent: "dialogue_unshelved",
 		});
 	}
 
-	async archive(surface: string, dialogueId: string): Promise<DialogueRecord> {
-		const current = await this.readDialogue(this.dialogueDir(surface, dialogueId));
-		return this.updateDialogueState(surface, dialogueId, current?.state || "abandoned", {
+	async archive(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<DialogueRecord> {
+		const current = await this.readDialogue(this.dialogueDir(project, surface, dialogueId));
+		return this.updateDialogueState(project, surface, dialogueId, current?.state || "abandoned", {
 			archived: true,
 			auditEvent: "dialogue_archived",
 		});
 	}
 
-	async resume(surface: string, dialogueId: string): Promise<DialogueRecord> {
-		return this.updateDialogueState(surface, dialogueId, "needs_reply", {
+	async resume(
+		project: string | undefined,
+		surface: string,
+		dialogueId: string,
+	): Promise<DialogueRecord> {
+		return this.updateDialogueState(project, surface, dialogueId, "needs_reply", {
 			archived: false,
 			auditEvent: "dialogue_resumed",
 		});
@@ -475,6 +552,7 @@ export class FactoryDialogueStore {
 	}
 
 	async list(input: {
+		project?: string;
 		surface?: string;
 		states?: DialogueState[];
 		includeArchived?: boolean;
@@ -484,25 +562,33 @@ export class FactoryDialogueStore {
 			await Promise.all(directories.map((directory) => this.readDialogue(directory)))
 		).filter((record): record is DialogueRecord => Boolean(record));
 		const stateFilter = new Set(input.states || []);
+		const project = projectSegment(input.project);
 		return records
+			.filter((record) => record.project === project)
 			.filter((record) => (input.surface ? record.surface === input.surface : true))
 			.filter((record) => (stateFilter.size ? stateFilter.has(record.state) : true))
 			.filter((record) => input.includeArchived || !record.archived)
 			.sort((a, b) => b.last_activity_at.localeCompare(a.last_activity_at));
 	}
 
-	async attentionCounts(input: { surface?: string } = {}): Promise<DialogueAttentionCounts> {
-		const items = (await this.list({ surface: input.surface })).filter((record) =>
-			HIGH_ATTENTION_STATES.has(record.state),
-		);
+	async attentionCounts(input: {
+		project?: string;
+		surface?: string;
+	} = {}): Promise<DialogueAttentionCounts> {
+		const items = (
+			await this.list({ project: input.project, surface: input.surface })
+		).filter((record) => HIGH_ATTENTION_STATES.has(record.state));
+		const by_project: Record<string, number> = {};
 		const by_surface: Record<string, number> = {};
 		const by_state: Partial<Record<DialogueState, number>> = {};
 		for (const item of items) {
+			by_project[item.project] = (by_project[item.project] || 0) + 1;
 			by_surface[item.surface] = (by_surface[item.surface] || 0) + 1;
 			by_state[item.state] = (by_state[item.state] || 0) + 1;
 		}
 		return {
 			total: items.length,
+			by_project,
 			by_surface,
 			by_state,
 			items,

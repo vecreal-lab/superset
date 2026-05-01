@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	EmptyFactoryState,
@@ -8,6 +9,7 @@ import {
 	FactorySection,
 	SourceButton,
 	StatusBadge,
+	rowMatchesProject,
 	type FactoryRow,
 } from "../components/FactoryView";
 
@@ -19,6 +21,7 @@ export const Route = createFileRoute(
 
 function StrategyPulsePage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const roles = electronTrpc.factory.dataset.useQuery({ dataset: "roles" });
 	const runs = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "runs" },
@@ -29,12 +32,14 @@ function StrategyPulsePage() {
 	);
 	const pulseRuns = useMemo(
 		() =>
-			(runs.data || []).filter((row: FactoryRow) =>
-				`${row.id} ${row.title} ${row.source_relative_path}`.includes(
-					"STRATEGY_STEWARD",
-				),
+			(runs.data || []).filter(
+				(row: FactoryRow) =>
+					rowMatchesProject(row, activeProjectId) &&
+					`${row.id} ${row.title} ${row.source_relative_path}`.includes(
+						"STRATEGY_STEWARD",
+					),
 			),
-		[runs.data],
+		[activeProjectId, runs.data],
 	);
 	const lanes = [
 		"Moat health",
@@ -53,7 +58,7 @@ function StrategyPulsePage() {
 	return (
 		<FactoryPage
 			title="Strategy Pulse"
-			description="Strategy Steward surface for moat, positioning, selling, product-improvement, and build-vs-compose drift signals."
+			description="Strategy Steward surface for the active project: moat, positioning, selling, product-improvement, and build-vs-compose drift signals."
 		>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
 				{pulseRuns.length === 0 ? (

@@ -1,5 +1,9 @@
 import { useState } from "react";
 import { MarkdownRenderer } from "renderer/components/MarkdownRenderer/MarkdownRenderer";
+import {
+	projectFoundationPath,
+	useActiveProjectId,
+} from "renderer/stores/active-project";
 import { LDPSurface } from "../LDPSurface";
 import type {
 	LDPCascadeDraft,
@@ -13,25 +17,6 @@ const primaryAgent: LDPDialogueAgent = {
 	roleId: "DOMAIN_KNOWLEDGE_STEWARD",
 	description:
 		"Co-authors domain-grounded identity and explains downstream impact before any commit.",
-};
-
-const status: LDPStatusSummary = {
-	kind: "document",
-	label: "Mission stub",
-	state: "in_dialogue",
-	sourcePath: "docs/factory/mission.md",
-	lastUpdated: "2026-05-01",
-	primaryAgent: primaryAgent.roleId,
-	metrics: [
-		{ label: "Sections present", value: 5, tone: "success" },
-		{ label: "TKTK placeholders", value: 3, tone: "warning" },
-		{ label: "Cascade drafts", value: 2 },
-		{ label: "Confidence", value: "demo" },
-	],
-	flags: [
-		{ label: "Operating Principle #13 active", tone: "success" },
-		{ label: "Synthetic data only" },
-	],
 };
 
 const initialTurns: LDPDialogueTurn[] = [
@@ -82,6 +67,35 @@ const cascadeDrafts: LDPCascadeDraft[] = [
 export function LDPDemoHarness() {
 	const [inputValue, setInputValue] = useState("");
 	const [turns, setTurns] = useState(initialTurns);
+	const activeProjectId = useActiveProjectId();
+	const missionPath = projectFoundationPath(activeProjectId, "mission.md");
+	const status: LDPStatusSummary = {
+		kind: "document",
+		label: "Mission stub",
+		state: "in_dialogue",
+		sourcePath: missionPath,
+		lastUpdated: "2026-05-01",
+		primaryAgent: primaryAgent.roleId,
+		metrics: [
+			{ label: "Sections present", value: 5, tone: "success" },
+			{
+				label: "TKTK placeholders",
+				value: activeProjectId === "software-factory" ? 0 : 3,
+				tone: activeProjectId === "software-factory" ? "success" : "warning",
+			},
+			{ label: "Cascade drafts", value: 2 },
+			{ label: "Confidence", value: "demo" },
+		],
+		flags: [
+			{ label: "Operating Principle #13 active", tone: "success" },
+			{ label: `Active project: ${activeProjectId}` },
+			{ label: "Synthetic data only" },
+		],
+	};
+	const identityLine =
+		activeProjectId === "software-factory"
+			? "Software Factory is an Agentic AI Intelligence Software factory."
+			: "A vertical AI intelligence company for construction general contractors.";
 
 	function handleSubmit() {
 		const nextTurn: LDPDialogueTurn = {
@@ -109,7 +123,7 @@ export function LDPDemoHarness() {
 			onSubmit={handleSubmit}
 			readPane={
 				<MarkdownRenderer
-					content={`# Mission\n\n## Identity\n\nVertical AI Intelligence Company for General Contractors\n\n## Mission\n\nTKTK -- DOMAIN_KNOWLEDGE_STEWARD intake will populate.\n\n## Decision Filter\n\nTKTK -- this demo read pane is synthetic.`}
+					content={`# Mission\n\n## Identity\n\n${identityLine}\n\n## Mission\n\nTKTK -- DOMAIN_KNOWLEDGE_STEWARD intake will populate.\n\n## Decision Filter\n\nTKTK -- this demo read pane is synthetic.\n\n_Source: ${missionPath}_`}
 					className="h-auto overflow-visible"
 				/>
 			}

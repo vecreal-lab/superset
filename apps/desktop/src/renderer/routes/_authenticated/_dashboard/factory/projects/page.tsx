@@ -10,6 +10,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	EmptyFactoryState,
@@ -75,6 +76,7 @@ function buildProjectTree(rows: FactoryRow[]): ProjectTreeNode[] {
 
 function ProjectsPage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const projects = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "projects" },
 		{ refetchInterval: 5000 },
@@ -108,6 +110,9 @@ function ProjectsPage() {
 							<div className="flex items-center gap-2">
 								<div className="font-medium">{row.title}</div>
 								<Badge variant="outline">{nodeType}</Badge>
+								{projectId === activeProjectId && (
+									<Badge variant="secondary">active</Badge>
+								)}
 							</div>
 							<div className="font-mono text-xs text-muted-foreground">
 								{row.id}
@@ -149,7 +154,7 @@ function ProjectsPage() {
 	return (
 		<FactoryPage
 			title="Project Hierarchy"
-			description="Organization and project tree from projects/project-hierarchy.yml, enriched with project pipeline and identity artifacts."
+			description="Organization and project tree from projects/project-hierarchy.yml, with the active cockpit project highlighted."
 		>
 			<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
 				{rows.length === 0 && (

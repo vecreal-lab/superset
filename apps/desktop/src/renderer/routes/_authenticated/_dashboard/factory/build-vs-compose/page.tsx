@@ -12,6 +12,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { MarkdownRenderer } from "renderer/components/MarkdownRenderer/MarkdownRenderer";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	EmptyFactoryState,
@@ -67,16 +68,19 @@ function parseMarkdownTable(content: string): MatrixRow[] {
 function BuildVsComposePage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const [sheetSource, setSheetSource] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const foundations = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "foundations" },
 		{ refetchInterval: 5000 },
 	);
 	const matrices = useMemo(
 		() =>
-			(foundations.data || []).filter((row: FactoryRow) =>
-				row.source_relative_path.endsWith("build-vs-compose-matrix.md"),
+			(foundations.data || []).filter(
+				(row: FactoryRow) =>
+					row.source_relative_path.includes(`projects/${activeProjectId}/`) &&
+					row.source_relative_path.endsWith("build-vs-compose-matrix.md"),
 			),
-		[foundations.data],
+		[activeProjectId, foundations.data],
 	);
 	useEffect(() => {
 		if (!selectedSource && matrices[0]) setSelectedSource(matrices[0].source_relative_path);

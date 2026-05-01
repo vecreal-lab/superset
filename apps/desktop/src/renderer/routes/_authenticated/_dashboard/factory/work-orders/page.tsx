@@ -9,6 +9,7 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	FactoryPage,
@@ -16,6 +17,7 @@ import {
 	SourceButton,
 	StatusBadge,
 	WorkOrderLink,
+	rowMatchesProject,
 	type FactoryRow,
 } from "../components/FactoryView";
 
@@ -28,25 +30,28 @@ export const Route = createFileRoute(
 function WorkOrdersPage() {
 	const [query, setQuery] = useState("");
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const workOrders = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "work_orders" },
 		{ refetchInterval: 5000 },
 	);
 	const rows = useMemo(() => {
 		const needle = query.trim().toLowerCase();
-		return (workOrders.data || []).filter((row: FactoryRow) =>
-			needle
-				? `${row.id} ${row.title} ${row.status} ${row.source_relative_path}`
-						.toLowerCase()
-						.includes(needle)
-				: true,
-		);
-	}, [query, workOrders.data]);
+		return (workOrders.data || [])
+			.filter((row: FactoryRow) => rowMatchesProject(row, activeProjectId))
+			.filter((row: FactoryRow) =>
+				needle
+					? `${row.id} ${row.title} ${row.status} ${row.source_relative_path}`
+							.toLowerCase()
+							.includes(needle)
+					: true,
+			);
+	}, [activeProjectId, query, workOrders.data]);
 
 	return (
 		<FactoryPage
 			title="Work Orders"
-			description="Canonical work-order queue with status, source traceability, and drilldown into runs, evidence, approvals, and attachments."
+			description="Canonical work-order queue for the active project, with status, source traceability, and drilldown into runs, evidence, approvals, and attachments."
 			actions={
 				<div className="w-80">
 					<FactorySearch

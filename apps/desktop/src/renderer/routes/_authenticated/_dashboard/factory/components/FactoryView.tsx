@@ -280,6 +280,23 @@ export function formatRelativeSource(path: string): string {
 	return path.length > 88 ? `...${path.slice(-85)}` : path;
 }
 
+export function rowMatchesProject(row: FactoryRow, projectId: string): boolean {
+	return (
+		row.data.project_id === projectId ||
+		row.source_relative_path.includes(`projects/${projectId}/`) ||
+		row.source_relative_path.includes(`runs/${projectId}/`) ||
+		row.source_relative_path.includes(`runs/dialogues/${projectId}/`)
+	);
+}
+
+export function rowIsSharedOrProject(row: FactoryRow, projectId: string): boolean {
+	return (
+		rowMatchesProject(row, projectId) ||
+		row.source_relative_path.startsWith("templates/") ||
+		row.source_relative_path.startsWith("projects/_shared/")
+	);
+}
+
 export function formatDate(value?: string | null): string {
 	if (!value) return "unknown";
 	const date = new Date(value);

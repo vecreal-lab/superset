@@ -15,6 +15,7 @@ import {
 	Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
+import { ProjectSwitcher } from "./components/ProjectSwitcher";
 
 interface FactoryNavItem {
 	to: string;
@@ -84,6 +85,9 @@ export function FactorySidebar() {
 						Vertical AI cockpit
 					</div>
 				</div>
+			</div>
+			<div className="border-b px-4 py-3">
+				<ProjectSwitcher />
 			</div>
 			<nav className="flex-1 overflow-y-auto px-2 py-2">
 				<ul className="flex flex-col gap-0.5">

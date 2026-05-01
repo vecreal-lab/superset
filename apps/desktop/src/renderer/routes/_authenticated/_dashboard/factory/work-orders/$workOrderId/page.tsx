@@ -12,6 +12,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { CheckCircle2, Upload } from "lucide-react";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	FactoryPage,
@@ -21,6 +22,7 @@ import {
 	StatusBadge,
 	formatDate,
 	parseShallowYaml,
+	rowMatchesProject,
 	type FactoryDocumentReference,
 	type FactoryRow,
 } from "../../components/FactoryView";
@@ -69,6 +71,7 @@ function WorkOrderDetailPage() {
 	const { workOrderId } = Route.useParams();
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const [selectedRunPath, setSelectedRunPath] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const workOrder = electronTrpc.factory.workOrder.useQuery({ id: workOrderId });
 	const workOrderDoc = electronTrpc.factory.document.useQuery(
 		{ path: workOrder.data?.source_relative_path || "" },
@@ -90,12 +93,13 @@ function WorkOrderDetailPage() {
 			(runs.data || []).filter((row: FactoryRow) => {
 				const workOrderFromRun = String(row.data.work_order_id || "");
 				return (
-					workOrderFromRun === workOrderId ||
-					row.title === workOrderId ||
-					row.id.toLowerCase().includes(workOrderId.toLowerCase())
+					rowMatchesProject(row, activeProjectId) &&
+					(workOrderFromRun === workOrderId ||
+						row.title === workOrderId ||
+						row.id.toLowerCase().includes(workOrderId.toLowerCase()))
 				);
 			}),
-		[runs.data, workOrderId],
+		[activeProjectId, runs.data, workOrderId],
 	);
 	const activeRunPath =
 		selectedRunPath || matchedRuns[0]?.source_relative_path.replace(/\/run\.json$/, "");

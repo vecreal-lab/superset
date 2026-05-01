@@ -11,11 +11,13 @@ import {
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	FactoryPage,
 	FactorySearch,
 	SourceButton,
+	rowIsSharedOrProject,
 	type FactoryRow,
 } from "../components/FactoryView";
 
@@ -32,11 +34,18 @@ function RolesPage() {
 	const [providerFilter, setProviderFilter] = useState("all");
 	const [reasoningFilter, setReasoningFilter] = useState("all");
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
+	const activeProjectId = useActiveProjectId();
 	const roles = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "roles" },
 		{ refetchInterval: 5000 },
 	);
-	const rows = roles.data || [];
+	const rows = useMemo(
+		() =>
+			(roles.data || []).filter((row: FactoryRow) =>
+				rowIsSharedOrProject(row, activeProjectId),
+			),
+		[activeProjectId, roles.data],
+	);
 	const providers = useMemo(
 		() => ["all", ...new Set(rows.map((row: FactoryRow) => text(row.data.provider)))],
 		[rows],
@@ -65,7 +74,7 @@ function RolesPage() {
 	return (
 		<FactoryPage
 			title="Role Catalog"
-			description="Canonical factory roles, provider policy, prompt templates, owned surfaces, verification duties, and escalation boundaries."
+			description="Shared and active-project role catalog, provider policy, prompt templates, owned surfaces, verification duties, and escalation boundaries."
 			actions={
 				<div className="w-80">
 					<FactorySearch value={query} placeholder="Search roles" onChange={setQuery} />
