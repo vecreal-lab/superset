@@ -82,6 +82,21 @@ const HIGH_ATTENTION_STATES = new Set<DialogueState>([
 	"awaiting_confirmation",
 ]);
 
+const SURFACE_PRIMARY_AGENTS: Record<string, string> = {
+	home: "ORCH",
+	mission: "DOMAIN_KNOWLEDGE_STEWARD",
+	foundations: "DOMAIN_KNOWLEDGE_STEWARD",
+	"work-orders": "ORCH",
+	approvals: "AUDIT",
+	"strategy-pulse": "STRATEGY_STEWARD",
+	roles: "AGENT_ARCHITECT",
+	"build-vs-compose": "LANDSCAPE_ANALYST",
+	decisions: "STRATEGY_STEWARD",
+	lessons: "KNOWLEDGE_LIBRARIAN",
+	projects: "PROJECT_HEALTH_MONITOR",
+	dialogues: "ORCH",
+};
+
 function normalizeSlashes(value: string): string {
 	return value.replace(/\\/g, "/");
 }
@@ -186,29 +201,76 @@ function previewMessage(messages: DialogueMessage[]): string {
 	return last.content.length > 140 ? `${last.content.slice(0, 137)}...` : last.content;
 }
 
-function inferNextState(message: string): DialogueState {
+function surfaceLabel(surface: string): string {
+	return surface.replace(/[-_/]+/g, " ");
+}
+
+function surfacePrimaryAgent(surface: string): string {
+	const normalized = surfaceSegments(surface).at(0) || "home";
+	return SURFACE_PRIMARY_AGENTS[normalized] || "ORCH";
+}
+
+function operatorSurfaceKey(surface: string): string | null {
+	const normalized = surfaceSegments(surface).at(0);
+	return normalized && SURFACE_PRIMARY_AGENTS[normalized] ? normalized : null;
+}
+
+function isAmbiguousCommitPhrase(normalized: string): boolean {
+	return /^(sounds good|ok|okay|yeah|yep|sure|looks good)\.?$/.test(normalized);
+}
+
+function isConcreteCommitPhrase(normalized: string): boolean {
+	return /\b(approved|approve|confirm|confirmed|ship it|do it|go|commit)\b/.test(
+		normalized,
+	);
+}
+
+function isChangeProposal(normalized: string): boolean {
+	return /\b(change|edit|update|rewrite|replace|revise)\b/.test(normalized);
+}
+
+function inferNextState(message: string, previousState?: DialogueState): DialogueState {
 	const normalized = message.trim().toLowerCase();
-	if (/^(sounds good|ok|okay|yeah|yep|sure|looks good)\.?$/.test(normalized)) {
+	if (isAmbiguousCommitPhrase(normalized)) {
 		return "awaiting_confirmation";
 	}
-	if (/\b(commit|approved|confirm|ship it|do it|go)\b/.test(normalized)) {
-		return "awaiting_commit";
+	if (isConcreteCommitPhrase(normalized)) {
+		return previousState === "awaiting_commit"
+			? "awaiting_commit"
+			: "awaiting_confirmation";
 	}
-	if (/\b(change|edit|update|rewrite|replace|revise)\b/.test(normalized)) {
+	if (isChangeProposal(normalized)) {
 		return "awaiting_commit";
 	}
 	return "needs_reply";
 }
 
-function mockAgentResponse(surface: string, message: string, state: DialogueState): string {
-	const target = surface.replace(/[-_/]+/g, " ");
-	if (state === "awaiting_confirmation") {
-		return `Confirming: you may be asking me to commit a change on ${target}. Reply with approved/confirm/go after I restate the exact change, or tell me what to adjust.`;
+function dialogueStewardResponse(input: {
+	project: string;
+	surface: string;
+	message: string;
+	state: DialogueState;
+	previousState?: DialogueState;
+}): string {
+	const target = surfaceLabel(input.surface);
+	const primaryAgent = surfacePrimaryAgent(input.surface);
+	const normalized = input.message.trim().toLowerCase();
+	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.`;
+
+	if (input.state === "awaiting_confirmation") {
+		return `${lead}\n\nI am treating this as not clear enough to commit yet. Restate-and-ask: do you want me to change the ${target} source, or were you confirming the direction conversationally? Reply with the exact change or an explicit approval after the proposal is clear.`;
 	}
-	if (state === "awaiting_commit") {
-		return `I read this as a proposed change on ${target}. Mock impact analysis: I would review nearby foundations, recent work orders, and affected cockpit copy before commit. No write has happened yet.`;
+	if (
+		input.state === "awaiting_commit" &&
+		isConcreteCommitPhrase(normalized) &&
+		input.previousState === "awaiting_commit"
+	) {
+		return `${lead}\n\nConcrete approval received after a clear proposal. I am ready for the commit action; when you commit, I will preserve the audit trail and surface cascade links to /factory/work-orders and /factory/approvals.`;
 	}
-	return `I am treating this as exploration on ${target}. Mock analysis: I would read the surface source, related foundations, recent decisions, and open work orders before recommending next steps.`;
+	if (input.state === "awaiting_commit") {
+		return `${lead}\n\nI read this as a proposed change. Impact review before commit: read the ${target} source artifact, related foundations, open work orders, and recent decisions; then ask ${primaryAgent} for surface judgment and AUDIT for criteria risk if the proposal changes accepted behavior. No write has happened yet.`;
+	}
+	return `${lead}\n\nI am treating this as exploration or Q&A. I will answer from the living document, cite the nearest source artifacts, call out downstream impact, and only move toward commit after a specific proposal is stated.`;
 }
 
 export class FactoryDialogueStore {
@@ -408,7 +470,12 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
-			content: mockAgentResponse(input.surface, input.message, state),
+			content: dialogueStewardResponse({
+				project,
+				surface: input.surface,
+				message: input.message,
+				state,
+			}),
 			created_at: nowIso(),
 		};
 		await this.appendMessage(directory, operatorMessage);
@@ -437,7 +504,7 @@ export class FactoryDialogueStore {
 				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
 			);
 		}
-		const state = inferNextState(input.message);
+		const state = inferNextState(input.message, existing.state);
 		const timestamp = nowIso();
 		const operatorMessage: DialogueMessage = {
 			id: randomUUID(),
@@ -453,7 +520,13 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
-			content: mockAgentResponse(input.surface, input.message, state),
+			content: dialogueStewardResponse({
+				project,
+				surface: input.surface,
+				message: input.message,
+				state,
+				previousState: existing.state,
+			}),
 			created_at: nowIso(),
 		};
 		await this.appendMessage(directory, operatorMessage);
@@ -473,10 +546,22 @@ export class FactoryDialogueStore {
 	}): Promise<DialogueRecord> {
 		const project = projectSegment(input.project);
 		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
+		const cascadeId = `WO-LDP-CASCADE-${input.dialogueId.slice(0, 8).toUpperCase()}`;
 		await this.appendAudit(directory, "commit_requested", {
 			project,
 			notes: input.notes || "",
-			mock_agent: true,
+			dialogue_steward_bridge: true,
+			cascade_work_order: `/factory/work-orders/${cascadeId}`,
+			approval_queue: "/factory/approvals",
+		});
+		await this.appendMessage(directory, {
+			id: randomUUID(),
+			dialogue_id: input.dialogueId,
+			kind: "agent",
+			speaker: "DIALOGUE_STEWARD",
+			role_id: "DIALOGUE_STEWARD",
+			content: `Commit recorded. Cascade draft links: [${cascadeId}](/factory/work-orders/${cascadeId}) and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
+			created_at: nowIso(),
 		});
 		return this.updateDialogueState(project, input.surface, input.dialogueId, "cascade_pending", {
 			auditEvent: "commit_recorded",
@@ -577,13 +662,18 @@ export class FactoryDialogueStore {
 	} = {}): Promise<DialogueAttentionCounts> {
 		const items = (
 			await this.list({ project: input.project, surface: input.surface })
-		).filter((record) => HIGH_ATTENTION_STATES.has(record.state));
+		).filter(
+			(record) =>
+				HIGH_ATTENTION_STATES.has(record.state) && operatorSurfaceKey(record.surface),
+		);
 		const by_project: Record<string, number> = {};
 		const by_surface: Record<string, number> = {};
 		const by_state: Partial<Record<DialogueState, number>> = {};
 		for (const item of items) {
+			const surface = operatorSurfaceKey(item.surface);
+			if (!surface) continue;
 			by_project[item.project] = (by_project[item.project] || 0) + 1;
-			by_surface[item.surface] = (by_surface[item.surface] || 0) + 1;
+			by_surface[surface] = (by_surface[surface] || 0) + 1;
 			by_state[item.state] = (by_state[item.state] || 0) + 1;
 		}
 		return {
