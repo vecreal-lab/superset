@@ -9,6 +9,7 @@ import {
 	Compass,
 	FileText,
 	GitBranch,
+	Inbox,
 	Layers,
 	Lightbulb,
 	ListTree,
@@ -18,6 +19,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
+import { useIntakeAttentionCount } from "../../hooks/useIntakeAttentionCount";
 import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 
@@ -48,6 +50,12 @@ const NAV_ITEMS: FactoryNavItem[] = [
 		label: "Foundations",
 		icon: <Layers className="size-4" />,
 		surface: "foundations",
+	},
+	{
+		to: "/factory/intake",
+		label: "Intake",
+		icon: <Inbox className="size-4" />,
+		surface: "intake",
 	},
 	{
 		to: "/factory/work-orders",
@@ -108,6 +116,7 @@ const NAV_ITEMS: FactoryNavItem[] = [
 export function FactorySidebar() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
 	const { countForSurface } = useDialogueAttentionCounts();
+	const intakeAttention = useIntakeAttentionCount();
 
 	return (
 		<div className="flex h-full w-full flex-col overflow-hidden border-r bg-background">
@@ -133,6 +142,10 @@ export function FactorySidebar() {
 							: pathname === item.to ||
 								pathname === `${item.to}/` ||
 								pathname.startsWith(`${item.to}/`);
+						const attentionCount =
+							item.surface === "intake"
+								? intakeAttention.count
+								: countForSurface(item.surface);
 						return (
 							<li key={item.to}>
 								<Link
@@ -146,12 +159,12 @@ export function FactorySidebar() {
 									>
 									{item.icon}
 									<span className="truncate">{item.label}</span>
-									{countForSurface(item.surface) > 0 && (
+									{attentionCount > 0 && (
 										<Badge
 											variant="secondary"
 											className="ml-auto min-w-5 justify-center px-1.5 py-0 text-[10px]"
 										>
-											{countForSurface(item.surface)}
+											{attentionCount}
 										</Badge>
 									)}
 								</Link>
