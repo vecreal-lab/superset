@@ -358,6 +358,11 @@ function IntakeListPage() {
 											navigate({
 												to: "/factory/intake/$intakeId",
 												params: { intakeId: encodeURIComponent(item.id) },
+												search: {
+													tab: "SUMMARY",
+													dialogueId: undefined,
+													planTarget: undefined,
+												},
 											})
 										}
 									>
