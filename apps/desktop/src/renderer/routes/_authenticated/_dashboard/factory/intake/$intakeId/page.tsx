@@ -13,6 +13,7 @@ import {
 } from "../../components/IntakeOutputTabs";
 import type { IntakePropagationTarget } from "../../components/IntakePropagationPlan";
 import { buildIntakeStatusSummary } from "../../components/IntakeStatusHeader";
+import { IntakePropagationPreview } from "../../components/IntakePropagationPreview";
 import {
 	LDPSurface,
 	type LDPDialogueAgent,
@@ -186,6 +187,7 @@ function IntakeDetailPage() {
 	const [streamingTurn, setStreamingTurn] = useState<LDPDialogueTurn | null>(null);
 	const [localTurns, setLocalTurns] = useState<LDPDialogueTurn[]>([]);
 	const [thinkingLabel, setThinkingLabel] = useState<string | undefined>();
+	const [previewOpen, setPreviewOpen] = useState(false);
 	const intakeQuery = electronTrpc.factory.intake.get.useQuery(
 		{ intake_id: decodedIntakeId },
 		{ refetchInterval: 5000 },
@@ -366,9 +368,7 @@ function IntakeDetailPage() {
 				<Button
 					size="sm"
 					disabled={!canApprove}
-					onClick={() =>
-						toast.info("Propagation diff preview and atomic commit ship in WO-C21.6.")
-					}
+					onClick={() => setPreviewOpen(true)}
 				>
 					<Send className="size-4" />
 					Approve and propagate
@@ -427,6 +427,12 @@ function IntakeDetailPage() {
 					onDone={finishStreaming}
 				/>
 			)}
+			<IntakePropagationPreview
+				intakeId={decodedIntakeId}
+				open={previewOpen}
+				onOpenChange={setPreviewOpen}
+				onCommitted={() => void finishStreaming()}
+			/>
 		</>
 	);
 }

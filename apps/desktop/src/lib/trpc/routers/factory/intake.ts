@@ -5,6 +5,10 @@ import {
 	getFactoryIntakeStore,
 	type IntakeStreamEvent,
 } from "main/lib/factory-intake";
+import {
+	buildPropagationPreview,
+	commitPropagation,
+} from "main/lib/factory-intake/commit";
 import { publicProcedure, router } from "lib/trpc";
 
 const intakeStatusSchema = z.enum([
@@ -147,10 +151,31 @@ export const createFactoryIntakeRouter = () =>
 				z.object({
 					intake_id: z.string().min(1),
 					operator_reason: z.string().optional(),
+					skipped_paths: z.array(z.string()).optional(),
+					edited_targets: z
+						.array(
+							z.object({
+								path: z.string().min(1),
+								content: z.string(),
+							}),
+						)
+						.optional(),
+					simulate_failure_at: z.number().int().positive().optional(),
 				}),
 			)
 			.mutation(async ({ input }) => {
-				return getFactoryIntakeStore().commitPropagation(input);
+				const store = getFactoryIntakeStore();
+				const bundle = await store.get(input.intake_id);
+				const result = await commitPropagation(bundle, input);
+				const updated = await store.get(input.intake_id);
+				return { bundle: updated, ...result };
+			}),
+
+		previewPropagation: publicProcedure
+			.input(intakeIdSchema)
+			.query(async ({ input }) => {
+				const bundle = await getFactoryIntakeStore().get(input.intake_id);
+				return buildPropagationPreview(bundle);
 			}),
 
 		getDialogue: publicProcedure.input(intakeIdSchema).query(async ({ input }) => {
