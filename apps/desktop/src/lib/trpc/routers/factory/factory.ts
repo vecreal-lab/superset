@@ -7,6 +7,7 @@ import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { createFactoryCliRouter } from "./cli";
 import { createDialogueRouter } from "./dialogue";
+import { createFactoryIntakeRouter } from "./intake";
 
 const datasetSchema = z.enum(FACTORY_DATASETS);
 
@@ -14,6 +15,7 @@ export const createFactoryRouter = () =>
 	router({
 		cli: createFactoryCliRouter(),
 		dialogue: createDialogueRouter(),
+		intake: createFactoryIntakeRouter(),
 		summary: publicProcedure.query(async () => {
 			return getFactoryReadModel().summary();
 		}),
