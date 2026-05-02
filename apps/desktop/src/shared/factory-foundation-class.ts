@@ -25,10 +25,17 @@ export function getFoundationClassPathInfo(
 	relativePath: string,
 ): FoundationClassPathInfo | null {
 	const normalized = normalizeFactoryPath(relativePath);
-	const match = /^projects\/([^/]+)\/foundations\/(.+)$/.exec(normalized);
+	const match = /^projects\/(.+)\/foundations\/(.+)$/.exec(normalized);
 	if (!match) return null;
 	const [, projectId, artifactPath] = match;
-	if (!projectId || !artifactPath || artifactPath.includes("../")) return null;
+	if (
+		!projectId ||
+		!artifactPath ||
+		projectId.includes("..") ||
+		artifactPath.includes("../")
+	) {
+		return null;
+	}
 	const fileName = artifactPath.split("/").at(-1) || artifactPath;
 	return {
 		relativePath: normalized,

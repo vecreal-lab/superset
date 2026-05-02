@@ -110,7 +110,10 @@ function ProjectsPage() {
 	const rows = useMemo(() => buildProjectTree(projects.data || []), [projects.data]);
 	const flatRows = projects.data || [];
 	const productNodes = flatRows.filter(
-		(row: FactoryRow) => dataString(row, "node_type") === "product",
+		(row: FactoryRow) =>
+			["product", "product_subproject"].includes(
+				dataString(row, "node_type") || "",
+			),
 	).length;
 	const activeProjectRow = flatRows.find(
 		(row: FactoryRow) => dataString(row, "project_id") === activeProjectId,

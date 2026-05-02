@@ -184,6 +184,15 @@ interface ProjectHierarchyNode {
 	source_path?: string;
 }
 
+interface ProjectInfo {
+	projectId: string;
+	pipelinePath: string;
+	modifiedAt: string | null;
+	parsed: Record<string, string>;
+	identityPath: string | null;
+	identitySummary: string | null;
+}
+
 function parseProjectHierarchy(raw: string): ProjectHierarchyNode[] {
 	const nodes: ProjectHierarchyNode[] = [];
 	let current: ProjectHierarchyNode | null = null;
@@ -196,7 +205,7 @@ function parseProjectHierarchy(raw: string): ProjectHierarchyNode[] {
 			continue;
 		}
 
-		const property = /^\s{4}([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
+		const property = /^\s+([A-Za-z0-9_-]+):\s*(.*)$/.exec(line);
 		if (!current || !property) continue;
 		const [, key, value] = property;
 		if (!key) continue;
@@ -218,6 +227,42 @@ function getHierarchyPath(
 	const parent = byId.get(parentId);
 	if (!parent) return [node.id];
 	return [...getHierarchyPath(parent, byId, visiting), node.id];
+}
+
+async function readProjectInfo(
+	root: string,
+	pipelinePath: string,
+	projectIdFallback: string,
+): Promise<ProjectInfo | null> {
+	if (!existsSync(pipelinePath)) return null;
+	const modifiedAt = await fileModifiedAt(pipelinePath);
+	const raw = await readTextFile(pipelinePath);
+	const parsed = parseShallowYaml(raw);
+	const projectId = parsed.project_id || projectIdFallback;
+	const projectRoot = path.join(root, "projects", ...projectId.split("/"));
+	const foundationIdentity = path.join(projectRoot, "foundations", "identity.md");
+	const rootIdentity = path.join(projectRoot, "identity.md");
+	const identityPath = existsSync(foundationIdentity)
+		? foundationIdentity
+		: existsSync(rootIdentity)
+			? rootIdentity
+			: null;
+	let identitySummary: string | null = null;
+	if (identityPath) {
+		try {
+			identitySummary = firstMarkdownParagraph(await readTextFile(identityPath));
+		} catch {
+			identitySummary = null;
+		}
+	}
+	return {
+		projectId,
+		pipelinePath,
+		modifiedAt,
+		parsed,
+		identityPath,
+		identitySummary,
+	};
 }
 
 function parseMarkdownTitle(raw: string, fallback: string): string {
@@ -894,54 +939,18 @@ async function collectRoles(root: string): Promise<FactoryRow[]> {
 async function collectProjects(root: string): Promise<FactoryRow[]> {
 	const projectsRoot = path.join(root, "projects");
 	if (!existsSync(projectsRoot)) return [];
-	const entries = await readdir(projectsRoot, { withFileTypes: true });
-	const projectInfos = new Map<
-		string,
-		{
-			projectId: string;
-			pipelinePath: string;
-			modifiedAt: string | null;
-			parsed: Record<string, string>;
-			identityPath: string | null;
-			identitySummary: string | null;
-		}
-	>();
-	for (const entry of entries) {
-		if (!entry.isDirectory() || entry.name.startsWith("_")) continue;
-		const projectId = entry.name;
-		const pipelinePath = path.join(projectsRoot, projectId, "project-pipeline.yml");
-		if (!existsSync(pipelinePath)) continue;
-		const modifiedAt = await fileModifiedAt(pipelinePath);
-		const raw = await readTextFile(pipelinePath);
-		const parsed = parseShallowYaml(raw);
-		const foundationIdentity = path.join(
-			projectsRoot,
-			projectId,
-			"foundations",
-			"identity.md",
+	const projectInfos = new Map<string, ProjectInfo>();
+	const pipelinePaths = (await walkFiles(root, "projects", [".yml", ".yaml"]))
+		.filter((filePath) => filePath.replace(/\\/g, "/").endsWith("/project-pipeline.yml"));
+	for (const pipelinePath of pipelinePaths) {
+		const projectDir = path.dirname(pipelinePath);
+		const fallbackProjectId = relativePath(root, projectDir).replace(
+			/^projects\//,
+			"",
 		);
-		const rootIdentity = path.join(projectsRoot, projectId, "identity.md");
-		const identityPath = existsSync(foundationIdentity)
-			? foundationIdentity
-			: existsSync(rootIdentity)
-				? rootIdentity
-				: null;
-		let identitySummary: string | null = null;
-		if (identityPath) {
-			try {
-				identitySummary = firstMarkdownParagraph(await readTextFile(identityPath));
-			} catch {
-				identitySummary = null;
-			}
-		}
-		projectInfos.set(projectId, {
-			projectId,
-			pipelinePath,
-			modifiedAt,
-			parsed,
-			identityPath,
-			identitySummary,
-		});
+		if (!fallbackProjectId || fallbackProjectId.startsWith("_shared")) continue;
+		const projectInfo = await readProjectInfo(root, pipelinePath, fallbackProjectId);
+		if (projectInfo) projectInfos.set(projectInfo.projectId, projectInfo);
 	}
 
 	const hierarchyPath = path.join(projectsRoot, "project-hierarchy.yml");
@@ -958,9 +967,16 @@ async function collectProjects(root: string): Promise<FactoryRow[]> {
 	const usedProjectIds = new Set<string>();
 
 	for (const node of hierarchyNodes) {
-		const projectInfo = node.project_id
-			? projectInfos.get(node.project_id)
-			: undefined;
+		const projectInfo =
+			(node.project_id ? projectInfos.get(node.project_id) : undefined) ||
+			(node.source_path
+				? await readProjectInfo(
+						root,
+						path.join(root, node.source_path),
+						node.project_id || node.id,
+					)
+				: null) ||
+			undefined;
 		const hierarchyParts = getHierarchyPath(node, hierarchyById);
 		const sourcePath = projectInfo
 			? projectInfo.pipelinePath

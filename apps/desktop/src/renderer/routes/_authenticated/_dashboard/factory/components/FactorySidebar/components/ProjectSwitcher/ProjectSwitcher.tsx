@@ -2,12 +2,19 @@ import { Badge } from "@superset/ui/badge";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import {
 	DEFAULT_ACTIVE_PROJECT_ID,
+	normalizeActiveProjectId,
 	useActiveProjectId,
 	useSetActiveProjectId,
 } from "renderer/stores/active-project";
 import type { FactoryRow } from "../../../FactoryView";
 
-const SELECTABLE_NODE_TYPES = new Set(["factory_infrastructure", "product"]);
+const SELECTABLE_NODE_TYPES = new Set([
+	"factory_infrastructure",
+	"factory_self_improvement_project",
+	"org_project",
+	"product",
+	"product_subproject",
+]);
 
 function dataString(row: FactoryRow, key: string): string | null {
 	const value = row.data[key];
@@ -32,13 +39,18 @@ export function ProjectSwitcher() {
 		)
 		.filter((row: FactoryRow) => dataString(row, "project_id"))
 		.sort((a: FactoryRow, b: FactoryRow) => {
+			const treeA = dataString(a, "tree_path") || a.id;
+			const treeB = dataString(b, "tree_path") || b.id;
+			const treeOrder = treeA.localeCompare(treeB);
+			if (treeOrder !== 0) return treeOrder;
 			const order = dataNumber(a, "display_order") - dataNumber(b, "display_order");
 			return order || a.title.localeCompare(b.title);
 		});
+	const normalizedActiveProjectId = normalizeActiveProjectId(activeProjectId);
 	const value = options.some(
-		(row: FactoryRow) => dataString(row, "project_id") === activeProjectId,
+		(row: FactoryRow) => dataString(row, "project_id") === normalizedActiveProjectId,
 	)
-		? activeProjectId
+		? normalizedActiveProjectId
 		: DEFAULT_ACTIVE_PROJECT_ID;
 
 	return (
@@ -65,8 +77,13 @@ export function ProjectSwitcher() {
 				) : (
 					options.map((row: FactoryRow) => {
 						const projectId = dataString(row, "project_id") || row.id;
+						const depthValue = row.data.tree_depth;
+						const depth =
+							typeof depthValue === "number" ? depthValue : Number(depthValue || 0);
+						const prefix = depth > 0 ? `${"  ".repeat(depth)}- ` : "";
 						return (
 							<option key={projectId} value={projectId}>
+								{prefix}
 								{row.title}
 							</option>
 						);
