@@ -77,6 +77,7 @@ export interface LDPSurfaceProps {
 	primaryAgent: LDPDialogueAgent;
 	turns: LDPDialogueTurn[];
 	readPane: ReactNode;
+	visualDiffPane?: ReactNode;
 	inputValue: string;
 	inputPlaceholder?: string;
 	isThinking?: boolean;

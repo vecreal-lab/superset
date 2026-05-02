@@ -9,7 +9,16 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import {
+	FOUNDATION_OWNER_IDENTITY,
+	applyFoundationLockDate,
+	getFoundationClassPathInfo,
+	isFoundationClassPath,
+	isFoundationClassSurface,
+	isFoundationOwner,
+} from "shared/factory-foundation-class";
 import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
+import { buildUnifiedTextDiff } from "shared/factory-visual-diff";
 
 export const DIALOGUE_STATES = [
 	"needs_reply",
@@ -87,9 +96,35 @@ export interface DialogueCommitInput {
 	surface: string;
 	dialogueId: string;
 	notes?: string;
+	operatorName?: string;
+	operatorReason?: string;
+	visualDiffConfirmed?: boolean;
 	documentPath?: string;
 	documentBefore?: string;
 	documentAfter?: string;
+}
+
+export interface DialogueCascadeDraft {
+	id: string;
+	title: string;
+	href: string;
+	status: string;
+	summary?: string;
+	source_path?: string;
+}
+
+interface FoundationReviewScope {
+	foundationsFolder: string;
+	foundationFiles: string[];
+	citingDocs: string[];
+}
+
+interface DocumentCommitResult {
+	foundationClass: boolean;
+	documentPath: string;
+	diff: string;
+	reviewScope?: FoundationReviewScope;
+	cascadeDrafts: DialogueCascadeDraft[];
 }
 
 export interface DialogueAttentionCounts {
@@ -287,8 +322,11 @@ function dialogueStewardResponse(input: {
 	const impactLine = impactSpecialist
 		? ` ${impactSpecialist} handles impact analysis before downstream work is spawned.`
 		: "";
+	const foundationLine = isFoundationClassSurface(input.surface)
+		? ` This is a foundation-class surface: only ${FOUNDATION_OWNER_IDENTITY} can commit, holistic review includes the full foundations folder plus citing docs, and every non-trivial citation impact needs a cascade draft.`
+		: "";
 	const normalized = input.message.trim().toLowerCase();
-	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.${impactLine}`;
+	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.${impactLine}${foundationLine}`;
 
 	if (input.state === "awaiting_confirmation") {
 		return `${lead}\n\nI am treating this as not clear enough to commit yet. Restate-and-ask: do you want me to change the ${target} source, or were you confirming the direction conversationally? Reply with the exact change or an explicit approval after the proposal is clear.`;
@@ -737,14 +775,160 @@ export class FactoryDialogueStore {
 		return resolved;
 	}
 
+	private relativeToRoot(absolutePath: string): string {
+		return normalizeSlashes(path.relative(this.root, absolutePath));
+	}
+
+	private async walkReadableDocs(directory: string): Promise<string[]> {
+		if (!existsSync(directory)) return [];
+		const entries = await readdir(directory, { withFileTypes: true });
+		const files: string[] = [];
+		const skippedDirs = new Set([
+			".git",
+			".turbo",
+			"dist",
+			"dist-electron",
+			"node_modules",
+			"release",
+			"vendor",
+			"worktree",
+		]);
+		const readableExtensions = new Set([
+			".json",
+			".jsonl",
+			".md",
+			".txt",
+			".yaml",
+			".yml",
+		]);
+
+		for (const entry of entries) {
+			const absolutePath = path.join(directory, entry.name);
+			if (entry.isDirectory()) {
+				if (skippedDirs.has(entry.name)) continue;
+				files.push(...(await this.walkReadableDocs(absolutePath)));
+				continue;
+			}
+			if (!entry.isFile()) continue;
+			if (!readableExtensions.has(path.extname(entry.name).toLowerCase())) continue;
+			files.push(absolutePath);
+		}
+		return files;
+	}
+
+	private async foundationReviewScope(
+		documentPath: string,
+	): Promise<FoundationReviewScope> {
+		const info = getFoundationClassPathInfo(documentPath);
+		if (!info) {
+			return {
+				foundationsFolder: "",
+				foundationFiles: [],
+				citingDocs: [],
+			};
+		}
+		const foundationsDir = path.join(this.root, ...info.foundationsRoot.split("/"));
+		const foundationFiles = (await this.walkReadableDocs(foundationsDir))
+			.map((filePath) => this.relativeToRoot(filePath))
+			.sort();
+		const citationTokens = Array.from(
+			new Set([info.relativePath, info.artifactPath, info.fileName]),
+		).filter((token) => token.length > 0);
+		const allDocs = await this.walkReadableDocs(this.root);
+		const citingDocs: string[] = [];
+		for (const absolutePath of allDocs) {
+			const relativePath = this.relativeToRoot(absolutePath);
+			if (relativePath === info.relativePath) continue;
+			const content = await readFile(absolutePath, "utf8");
+			if (citationTokens.some((token) => content.includes(token))) {
+				citingDocs.push(relativePath);
+			}
+		}
+		return {
+			foundationsFolder: info.foundationsRoot,
+			foundationFiles,
+			citingDocs: citingDocs.sort(),
+		};
+	}
+
+	async getFoundationReviewScope(documentPath: string): Promise<FoundationReviewScope> {
+		const normalizedPath = normalizeSlashes(documentPath);
+		if (!isFoundationClassPath(normalizedPath)) {
+			return {
+				foundationsFolder: "",
+				foundationFiles: [],
+				citingDocs: [],
+			};
+		}
+		return this.foundationReviewScope(normalizedPath);
+	}
+
+	private async writeFoundationCascadeDrafts(input: {
+		directory: string;
+		dialogueId: string;
+		documentPath: string;
+		reason: string;
+		reviewScope: FoundationReviewScope;
+	}): Promise<DialogueCascadeDraft[]> {
+		if (input.reviewScope.citingDocs.length === 0) return [];
+		const draftsDir = path.join(input.directory, "cascade-drafts");
+		await mkdir(draftsDir, { recursive: true });
+		const timestamp = nowIso();
+		const drafts: DialogueCascadeDraft[] = [];
+
+		for (const [index, citingDoc] of input.reviewScope.citingDocs.entries()) {
+			const ordinal = String(index + 1).padStart(2, "0");
+			const id = `WO-LDP-CASCADE-${input.dialogueId.slice(0, 8).toUpperCase()}-${ordinal}`;
+			const draftPath = path.join(draftsDir, `${id}.yml`);
+			const relativeDraftPath = this.relativeToRoot(draftPath);
+			const title = `Review ${citingDoc} after foundation update`;
+			const summary = `Mandatory foundation-class cascade draft for ${citingDoc}.`;
+			const body = [
+				`id: ${JSON.stringify(id)}`,
+				`title: ${JSON.stringify(title)}`,
+				'status: "queued"',
+				'created_by: "DIALOGUE_STEWARD"',
+				`created_at: ${JSON.stringify(timestamp)}`,
+				`source_foundation: ${JSON.stringify(input.documentPath)}`,
+				`citing_doc: ${JSON.stringify(citingDoc)}`,
+				`originating_dialogue: ${JSON.stringify(input.dialogueId)}`,
+				`operator_reason: ${JSON.stringify(input.reason)}`,
+				"acceptance_criteria:",
+				`  - ${JSON.stringify(`Review ${citingDoc} against ${input.documentPath}.`)}`,
+				'  - "Update only if the foundation-class change has non-trivial impact."',
+				'  - "Record verification evidence before closing this cascade draft."',
+				"",
+			].join("\n");
+			await writeFile(draftPath, body, "utf8");
+			drafts.push({
+				id,
+				title,
+				href: `/factory/work-orders/${id}`,
+				status: "queued",
+				summary,
+				source_path: relativeDraftPath,
+			});
+		}
+
+		return drafts;
+	}
+
 	private async writeDocumentCommit(
 		directory: string,
 		input: Required<Pick<DialogueCommitInput, "documentPath" | "documentAfter">> &
-			Pick<DialogueCommitInput, "documentBefore"> & {
+			Pick<
+				DialogueCommitInput,
+				| "documentBefore"
+				| "notes"
+				| "operatorName"
+				| "operatorReason"
+				| "visualDiffConfirmed"
+			> & {
+				dialogueId: string;
 				project: string;
 				surface: string;
 			},
-	): Promise<void> {
+	): Promise<DocumentCommitResult> {
 		const documentPath = normalizeSlashes(input.documentPath);
 		const filePath = this.resolveWritableDocument({
 			project: input.project,
@@ -755,14 +939,94 @@ export class FactoryDialogueStore {
 		if (input.documentBefore !== undefined && current !== input.documentBefore) {
 			throw new Error(`Document changed before commit could apply: ${documentPath}`);
 		}
-		await writeFile(filePath, input.documentAfter, "utf8");
+		const isFoundationCommit =
+			isFoundationClassPath(documentPath) || isFoundationClassSurface(input.surface);
+		if (isFoundationCommit && !isFoundationClassPath(documentPath)) {
+			throw new Error(
+				`Foundation-class commits must target projects/<project>/foundations/**: ${documentPath}`,
+			);
+		}
+		let documentAfter = input.documentAfter;
+		let reviewScope: FoundationReviewScope | undefined;
+		let cascadeDrafts: DialogueCascadeDraft[] = [];
+		let lockDateDetails:
+			| ReturnType<typeof applyFoundationLockDate>
+			| undefined;
+
+		if (isFoundationCommit) {
+			if (!isFoundationOwner(input.operatorName)) {
+				throw new Error(
+					`Foundation-class commits require ${FOUNDATION_OWNER_IDENTITY} as the committing operator.`,
+				);
+			}
+			const reason = (input.operatorReason || input.notes || "").trim();
+			if (!reason) {
+				throw new Error("Foundation-class commits require an operator-stated reason.");
+			}
+			if (!input.visualDiffConfirmed) {
+				throw new Error("Foundation-class commits require visual diff confirmation.");
+			}
+			if (input.documentAfter === current) {
+				throw new Error(
+					"Foundation-class commits require a substantive document draft before the lock-date update.",
+				);
+			}
+			lockDateDetails = applyFoundationLockDate(input.documentAfter, nowIso().slice(0, 10));
+			documentAfter = lockDateDetails.content;
+			reviewScope = await this.foundationReviewScope(documentPath);
+		}
+
+		const diff = buildUnifiedTextDiff(current, documentAfter, {
+			beforeLabel: documentPath,
+			afterLabel: `${documentPath} (proposed)`,
+		});
+		await writeFile(filePath, documentAfter, "utf8");
+
+		if (isFoundationCommit && reviewScope) {
+			const reason = (input.operatorReason || input.notes || "").trim();
+			cascadeDrafts = await this.writeFoundationCascadeDrafts({
+				directory,
+				dialogueId: input.dialogueId,
+				documentPath,
+				reason,
+				reviewScope,
+			});
+			await this.appendAudit(directory, "foundation_class_document_written", {
+				project: input.project,
+				surface: input.surface,
+				document_path: documentPath,
+				operator: input.operatorName || "",
+				operator_reason: reason,
+				visual_diff_confirmed: true,
+				full_diff: diff,
+				lock_date_commit_date: lockDateDetails?.commitDate || "",
+				lock_date_previous: lockDateDetails?.previousLockText || "",
+				lock_date_next: lockDateDetails?.nextLockText || "",
+				review_scope: JSON.stringify(reviewScope),
+				cascade_drafts: JSON.stringify(cascadeDrafts),
+			});
+			return {
+				foundationClass: true,
+				documentPath,
+				diff,
+				reviewScope,
+				cascadeDrafts,
+			};
+		}
+
 		await this.appendAudit(directory, "document_written", {
 			project: input.project,
 			surface: input.surface,
 			document_path: documentPath,
 			bytes_before: String(current.length),
-			bytes_after: String(input.documentAfter.length),
+			bytes_after: String(documentAfter.length),
 		});
+		return {
+			foundationClass: false,
+			documentPath,
+			diff,
+			cascadeDrafts,
+		};
 	}
 
 	async commit(input: DialogueCommitInput): Promise<DialogueRecord> {
@@ -774,31 +1038,54 @@ export class FactoryDialogueStore {
 				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
 			);
 		}
+		let documentCommit: DocumentCommitResult | null = null;
 		if (input.documentPath && input.documentAfter !== undefined) {
-			await this.writeDocumentCommit(directory, {
+			documentCommit = await this.writeDocumentCommit(directory, {
 				project,
 				surface: input.surface,
+				dialogueId: input.dialogueId,
 				documentPath: input.documentPath,
 				documentBefore: input.documentBefore,
 				documentAfter: input.documentAfter,
+				notes: input.notes,
+				operatorName: input.operatorName,
+				operatorReason: input.operatorReason,
+				visualDiffConfirmed: input.visualDiffConfirmed,
 			});
 		}
 		const cascadeId = `WO-LDP-CASCADE-${input.dialogueId.slice(0, 8).toUpperCase()}`;
+		const cascadeDrafts = documentCommit?.cascadeDrafts.length
+			? documentCommit.cascadeDrafts
+			: [
+					{
+						id: cascadeId,
+						title: `Cascade from ${surfaceLabel(input.surface)} dialogue`,
+						href: `/factory/work-orders/${cascadeId}`,
+						status: "draft",
+						summary:
+							"The next implementation work order must cite this dialogue before writing.",
+					},
+				];
 		await this.appendAudit(directory, "commit_requested", {
 			project,
 			notes: input.notes || "",
 			document_path: input.documentPath || "",
 			dialogue_steward_bridge: true,
-			cascade_work_order: `/factory/work-orders/${cascadeId}`,
+			foundation_class: Boolean(documentCommit?.foundationClass),
+			cascade_work_order: cascadeDrafts[0]?.href || `/factory/work-orders/${cascadeId}`,
+			cascade_draft_list: JSON.stringify(cascadeDrafts),
 			approval_queue: "/factory/approvals",
 		});
+		const cascadeLinks = cascadeDrafts
+			.map((draft) => `[${draft.id}](${draft.href})`)
+			.join(", ");
 		await this.appendMessage(directory, {
 			id: randomUUID(),
 			dialogue_id: input.dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
-			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: [${cascadeId}](/factory/work-orders/${cascadeId}) and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
+			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: ${cascadeLinks || "none"} and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
 			created_at: nowIso(),
 		});
 		return this.updateDialogueState(project, input.surface, input.dialogueId, "cascade_pending", {
