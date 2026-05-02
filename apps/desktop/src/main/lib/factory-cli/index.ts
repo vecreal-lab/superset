@@ -48,6 +48,8 @@ const INVOCATION_TIMEOUT_MS = 10 * 60_000;
 const CLAUDE_MODEL = "claude-opus-4-7";
 const CODEX_MODEL = "gpt-5.4";
 
+const claudeStartedSessions = new Set<string>();
+
 const cachedStatuses = new Map<
 	FactoryCliProvider,
 	{ checkedAtMs: number; status: FactoryCliStatus }
@@ -93,6 +95,7 @@ function cliEnv(): NodeJS.ProcessEnv {
 		next[key] = value;
 	}
 	next.FACTORY_LOCAL_ONLY = "true";
+	next.SUPERSET_SKIP_NOTIFY_HOOK = "1";
 	return next;
 }
 
@@ -293,7 +296,8 @@ async function checkProvider(
 					"claude",
 					[
 						"-p",
-						"respond OK",
+						"--setting-sources",
+						"project,local",
 						"--output-format",
 						"json",
 						"--model",
@@ -301,7 +305,7 @@ async function checkProvider(
 						"--effort",
 						"max",
 					],
-					{ timeoutMs: HEALTH_TIMEOUT_MS },
+					{ input: "respond OK", timeoutMs: HEALTH_TIMEOUT_MS },
 				)
 			: await runCommand(
 					"codex",
@@ -316,9 +320,9 @@ async function checkProvider(
 						"--sandbox",
 						"read-only",
 						"--skip-git-repo-check",
-						"respond exactly OK",
+						"-",
 					],
-					{ timeoutMs: HEALTH_TIMEOUT_MS },
+					{ input: "respond exactly OK", timeoutMs: HEALTH_TIMEOUT_MS },
 				);
 	const pingOutput = `${pingResult.stdout}\n${pingResult.stderr}`.trim();
 	const roundTripOk = pingResult.exitCode === 0 && /\bOK\b/.test(pingOutput);
@@ -378,6 +382,16 @@ function extractClaudeChunk(line: string): { chunk?: string; result?: string; se
 	}
 }
 
+type ClaudeSessionMode = "session-id" | "resume";
+
+function claudeSessionArgs(dialogueId: string, mode: ClaudeSessionMode): string[] {
+	return mode === "resume" ? ["--resume", dialogueId] : ["--session-id", dialogueId];
+}
+
+function isClaudeSessionAlreadyInUse(result: CommandResult): boolean {
+	return `${result.stderr}\n${result.stdout}`.toLowerCase().includes("already in use");
+}
+
 export async function checkFactoryCliStatuses(
 	force = false,
 ): Promise<FactoryCliStatus[]> {
@@ -401,9 +415,10 @@ export async function invokeFactoryCliRole(
 				"--sandbox",
 				"read-only",
 				"--skip-git-repo-check",
-				input.prompt,
+				"-",
 			],
 			{
+				input: input.prompt,
 				timeoutMs: INVOCATION_TIMEOUT_MS,
 				signal: input.signal,
 				onStdout: input.onChunk,
@@ -421,52 +436,71 @@ export async function invokeFactoryCliRole(
 		};
 	}
 
-	let buffer = "";
-	let text = "";
-	let finalResult = "";
-	let sessionId: string | undefined;
-	const result = await runCommand(
-		"claude",
-		[
-			"-p",
-			input.prompt,
-			"--output-format",
-			"stream-json",
-			"--include-partial-messages",
-			"--verbose",
-			"--model",
-			CLAUDE_MODEL,
-			"--effort",
-			"max",
-			"--session-id",
-			input.dialogueId,
-		],
-		{
-			timeoutMs: INVOCATION_TIMEOUT_MS,
-			signal: input.signal,
-			onStdout: (chunk) => {
-				buffer += chunk;
-				let newlineIndex = buffer.indexOf("\n");
-				while (newlineIndex >= 0) {
-					const line = buffer.slice(0, newlineIndex).trim();
-					buffer = buffer.slice(newlineIndex + 1);
-					if (line) {
-						const parsed = extractClaudeChunk(line);
-						if (parsed.sessionId) sessionId = parsed.sessionId;
-						if (parsed.chunk) {
-							text += parsed.chunk;
-							input.onChunk?.(parsed.chunk);
+	const runClaude = async (mode: ClaudeSessionMode) => {
+		let buffer = "";
+		let text = "";
+		let finalResult = "";
+		let sessionId: string | undefined;
+		const result = await runCommand(
+			"claude",
+			[
+				"-p",
+				"--setting-sources",
+				"project,local",
+				"--output-format",
+				"stream-json",
+				"--include-partial-messages",
+				"--verbose",
+				"--model",
+				CLAUDE_MODEL,
+				"--effort",
+				"max",
+				...claudeSessionArgs(input.dialogueId, mode),
+			],
+			{
+				input: input.prompt,
+				timeoutMs: INVOCATION_TIMEOUT_MS,
+				signal: input.signal,
+				onStdout: (chunk) => {
+					buffer += chunk;
+					let newlineIndex = buffer.indexOf("\n");
+					while (newlineIndex >= 0) {
+						const line = buffer.slice(0, newlineIndex).trim();
+						buffer = buffer.slice(newlineIndex + 1);
+						if (line) {
+							const parsed = extractClaudeChunk(line);
+							if (parsed.sessionId) sessionId = parsed.sessionId;
+							if (parsed.chunk) {
+								text += parsed.chunk;
+								input.onChunk?.(parsed.chunk);
+							}
+							if (parsed.result) finalResult = parsed.result;
 						}
-						if (parsed.result) finalResult = parsed.result;
+						newlineIndex = buffer.indexOf("\n");
 					}
-					newlineIndex = buffer.indexOf("\n");
-				}
+				},
 			},
-		},
-	);
+		);
+		return { result, text, finalResult, sessionId };
+	};
+
+	const firstMode = claudeStartedSessions.has(input.dialogueId)
+		? "resume"
+		: "session-id";
+	let claudeResult = await runClaude(firstMode);
+	if (
+		claudeResult.result.exitCode !== 0 &&
+		firstMode === "session-id" &&
+		isClaudeSessionAlreadyInUse(claudeResult.result)
+	) {
+		claudeResult = await runClaude("resume");
+	}
+	const { result, finalResult, sessionId } = claudeResult;
+	let { text } = claudeResult;
 	if (result.exitCode !== 0) {
 		throw new Error(`${providerLabel(input.provider)} failed: ${result.stderr || result.stdout}`);
 	}
+	claudeStartedSessions.add(input.dialogueId);
 	if (!text.trim() && finalResult.trim()) {
 		text = finalResult;
 		input.onChunk?.(finalResult);

@@ -2,6 +2,12 @@
 {{MARKER}}
 # Called by CLI agents (Claude Code, Codex, etc.) when they complete or need input
 
+# Inline LDP turns stream directly in the cockpit, so they suppress terminal
+# notification windows while leaving batch agent notifications intact.
+if [ "$SUPERSET_SKIP_NOTIFY_HOOK" = "1" ]; then
+  exit 0
+fi
+
 # Get JSON input - Codex passes as argument, Claude pipes to stdin
 if [ -n "$1" ]; then
   INPUT="$1"
