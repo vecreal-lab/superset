@@ -7,6 +7,7 @@ import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { createFactoryCliRouter } from "./cli";
 import { createDialogueRouter } from "./dialogue";
+import { createFactoryDomainKnowledgeRouter } from "./domain-knowledge";
 import { createFactoryIntakeRouter } from "./intake";
 import { createFactoryLessonsRouter } from "./lessons";
 import { createFactoryStrategyPulseRouter } from "./strategy-pulse";
@@ -17,6 +18,7 @@ export const createFactoryRouter = () =>
 	router({
 		cli: createFactoryCliRouter(),
 		dialogue: createDialogueRouter(),
+		domainKnowledge: createFactoryDomainKnowledgeRouter(),
 		intake: createFactoryIntakeRouter(),
 		lessons: createFactoryLessonsRouter(),
 		strategyPulse: createFactoryStrategyPulseRouter(),
