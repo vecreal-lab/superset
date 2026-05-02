@@ -257,6 +257,7 @@ export function WorkOrderLink({
 		<Link
 			to="/factory/work-orders/$workOrderId"
 			params={{ workOrderId: id }}
+			search={{ dialogueId: undefined }}
 			className="font-medium underline-offset-4 hover:underline"
 		>
 			{children || id}

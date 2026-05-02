@@ -154,7 +154,7 @@ async function buildRolePrompt(input: {
 		"Use the cited source paths in your answer when you rely on a file. If the prompt is ambiguous, restate what you think Yuriy means and ask one clear follow-up.",
 		"Subscription-auth only: you are running through the local CLI subprocess; do not ask for API keys.",
 		input.mode === "impact"
-			? "This is the STRATEGY_STEWARD impact pass. Focus on strategic/product impact, drift risk, and downstream propagation. Do not repeat the primary answer."
+			? "This is the specialist impact pass. Focus on your role's lane, drift risk, downstream propagation, and decisions needed. Do not repeat the primary answer."
 			: "This is the primary surface-specialist pass. Answer the operator's prompt from the living document and active-project foundations.",
 		"",
 		"## Role Prompt",

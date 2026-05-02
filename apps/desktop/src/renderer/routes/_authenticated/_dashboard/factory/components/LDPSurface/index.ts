@@ -1,4 +1,5 @@
 export { LDPSurface } from "./LDPSurface";
+export { useLDPSurfaceDialogue } from "./useLDPSurfaceDialogue";
 export type {
 	LDPCascadeDraft,
 	LDPDialogueAgent,

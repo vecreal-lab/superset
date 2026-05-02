@@ -370,6 +370,108 @@ async function parseYamlRow(
 	}
 }
 
+function parsePipelineYuriyGateCounts(raw: string): Map<string, number> {
+	const counts = new Map<string, number>();
+	let currentVariant: string | null = null;
+	let inYuriyGates = false;
+
+	for (const line of raw.split(/\r?\n/)) {
+		const variant = /^\s*-\s+id:\s*(.*)$/.exec(line);
+		if (variant) {
+			currentVariant = stripYamlScalar(variant[1] || "");
+			inYuriyGates = false;
+			continue;
+		}
+
+		if (!currentVariant) continue;
+
+		const gates = /^\s{4}yuriy_gates:\s*(.*)$/.exec(line);
+		if (gates) {
+			const value = (gates[1] || "").trim();
+			if (value.startsWith("[") && value.endsWith("]")) {
+				const items = value
+					.slice(1, -1)
+					.split(",")
+					.map((item) => stripYamlScalar(item))
+					.filter(Boolean);
+				counts.set(currentVariant, items.length);
+				inYuriyGates = false;
+			} else {
+				counts.set(currentVariant, 0);
+				inYuriyGates = true;
+			}
+			continue;
+		}
+
+		if (inYuriyGates) {
+			const item = /^\s{6,}-\s+(.+)$/.exec(line);
+			if (item) {
+				counts.set(currentVariant, (counts.get(currentVariant) || 0) + 1);
+				continue;
+			}
+			if (/^\s{4}[A-Za-z0-9_-]+:\s*/.test(line)) {
+				inYuriyGates = false;
+			}
+		}
+	}
+
+	return counts;
+}
+
+function workOrderGateState(input: {
+	status?: string | null;
+	pipelineVariant?: string | null;
+	gateCounts: Map<string, number>;
+}): "Yuriy gate required" | "AUDIT-only" | "shipped" {
+	const status = (input.status || "").toLowerCase();
+	if (
+		status === "shipped" ||
+		status === "complete" ||
+		status === "completed" ||
+		status === "done"
+	) {
+		return "shipped";
+	}
+	const gateCount = input.pipelineVariant
+		? input.gateCounts.get(input.pipelineVariant)
+		: undefined;
+	return gateCount && gateCount > 0 ? "Yuriy gate required" : "AUDIT-only";
+}
+
+async function parseWorkOrderRow(
+	root: string,
+	filePath: string,
+	fallbackId: string,
+	gateCounts: Map<string, number>,
+): Promise<FactoryRow> {
+	const row = await parseYamlRow(root, filePath, fallbackId);
+	let originatingRole: string | null = null;
+	try {
+		const raw = await readTextFile(filePath);
+		originatingRole =
+			raw.match(/^\s*-\s+role:\s*([A-Za-z0-9_/-]+)/m)?.[1] ||
+			raw.match(/^role:\s*([A-Za-z0-9_/-]+)/m)?.[1] ||
+			null;
+	} catch {
+		originatingRole = null;
+	}
+	const pipelineVariant =
+		typeof row.data.pipeline_variant === "string" ? row.data.pipeline_variant : null;
+	const yuriyGateCount = pipelineVariant ? gateCounts.get(pipelineVariant) : undefined;
+	row.data = {
+		...row.data,
+		gate_state: workOrderGateState({
+			status: row.status,
+			pipelineVariant,
+			gateCounts,
+		}),
+		yuriy_gate_count: yuriyGateCount ?? 0,
+		pipeline_variant_known: pipelineVariant ? gateCounts.has(pipelineVariant) : false,
+		originating_role: originatingRole,
+	};
+	return row;
+}
+
 async function parseMarkdownRow(
 	root: string,
 	filePath: string,
@@ -455,9 +557,18 @@ async function parseDecisionMarkdownRow(
 
 async function collectWorkOrders(root: string): Promise<FactoryRow[]> {
 	const files = await walkFiles(root, "work-orders", [".yml", ".yaml"]);
+	const pipelinePath = path.join(root, "projects", "software-factory", "project-pipeline.yml");
+	const gateCounts = existsSync(pipelinePath)
+		? parsePipelineYuriyGateCounts(await readTextFile(pipelinePath))
+		: new Map<string, number>();
 	return Promise.all(
 		files.map((filePath) =>
-			parseYamlRow(root, filePath, path.basename(filePath, path.extname(filePath))),
+			parseWorkOrderRow(
+				root,
+				filePath,
+				path.basename(filePath, path.extname(filePath)),
+				gateCounts,
+			),
 		),
 	);
 }

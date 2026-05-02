@@ -239,6 +239,12 @@ function surfaceImpactSpecialist(surface: string): string | null {
 	if (normalized === "mission" || normalized === "foundations") {
 		return "STRATEGY_STEWARD";
 	}
+	if (normalized === "work-orders") {
+		return "PRODUCT_SCOPE";
+	}
+	if (normalized === "build-vs-compose") {
+		return "STRATEGY_STEWARD";
+	}
 	return null;
 }
 

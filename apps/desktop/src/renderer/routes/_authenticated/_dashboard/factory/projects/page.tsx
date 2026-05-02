@@ -7,23 +7,39 @@ import {
 	TableHeader,
 	TableRow,
 } from "@superset/ui/table";
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { type ReactNode, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useActiveProjectId } from "renderer/stores/active-project";
 import {
 	DocumentSheet,
 	EmptyFactoryState,
-	FactoryPage,
 	SourceButton,
+	formatDate,
 	type FactoryRow,
 } from "../components/FactoryView";
+import {
+	LDPSurface,
+	useLDPSurfaceDialogue,
+	type LDPDialogueAgent,
+	type LDPStatusSummary,
+} from "../components/LDPSurface";
 
 export const Route = createFileRoute(
 	"/_authenticated/_dashboard/factory/projects/",
 )({
+	validateSearch: (search) => ({
+		dialogueId:
+			typeof search.dialogueId === "string" ? search.dialogueId : undefined,
+	}),
 	component: ProjectsPage,
 });
+
+const PROJECTS_AGENT: LDPDialogueAgent = {
+	name: "PROJECT_HEALTH_MONITOR",
+	roleId: "PROJECT_HEALTH_MONITOR",
+	description: "Primary project hierarchy and health steward.",
+};
 
 function countForProject(rows: FactoryRow[], projectId: string): number {
 	return rows.filter(
@@ -77,6 +93,8 @@ function buildProjectTree(rows: FactoryRow[]): ProjectTreeNode[] {
 function ProjectsPage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const activeProjectId = useActiveProjectId();
+	const search = Route.useSearch();
+	const navigate = useNavigate();
 	const projects = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "projects" },
 		{ refetchInterval: 5000 },
@@ -90,6 +108,56 @@ function ProjectsPage() {
 		{ refetchInterval: 5000 },
 	);
 	const rows = useMemo(() => buildProjectTree(projects.data || []), [projects.data]);
+	const flatRows = projects.data || [];
+	const productNodes = flatRows.filter(
+		(row: FactoryRow) => dataString(row, "node_type") === "product",
+	).length;
+	const activeProjectRow = flatRows.find(
+		(row: FactoryRow) => dataString(row, "project_id") === activeProjectId,
+	);
+	const ldp = useLDPSurfaceDialogue({
+		project: activeProjectId,
+		surface: "projects",
+		title: "Projects dialogue",
+		initialDialogueId: search.dialogueId,
+		onDialogueIdChange: (dialogueId) =>
+			navigate({
+				to: "/factory/projects",
+				search: { dialogueId },
+				replace: true,
+			}),
+	});
+	const status: LDPStatusSummary = {
+		kind: "read_model",
+		label: "Projects",
+		state: ldp.state,
+		sourcePath:
+			(activeProjectRow
+				? dataString(activeProjectRow, "hierarchy_source_path")
+				: null) ||
+			"projects/project-hierarchy.yml",
+		lastUpdated: formatDate(activeProjectRow?.modified_at),
+		primaryAgent: PROJECTS_AGENT.roleId,
+		metrics: [
+			{ label: "Hierarchy nodes", value: flatRows.length },
+			{ label: "Product nodes", value: productNodes },
+			{
+				label: "Active project WOs",
+				value: countForProject(workOrders.data || [], activeProjectId),
+			},
+			{
+				label: "Active project runs",
+				value: countForProject(runs.data || [], activeProjectId),
+			},
+		],
+		flags: [
+			{ label: `Active project: ${activeProjectId}` },
+			{
+				label: activeProjectRow?.title || "Project row not found",
+				tone: activeProjectRow ? "success" : "warning",
+			},
+		],
+	};
 
 	const renderRows = (nodes: ProjectTreeNode[], depth = 0): ReactNode[] =>
 		nodes.flatMap((row) => {
@@ -151,41 +219,54 @@ function ProjectsPage() {
 			];
 		});
 
+	const readPane = (
+		<div className="space-y-4">
+			{rows.length === 0 && (
+				<EmptyFactoryState
+					title="No project hierarchy found"
+					body="Add projects/project-hierarchy.yml and project-pipeline hierarchy metadata to render the factory project tree."
+					sourcePath="projects/_shared/foundations/project-hierarchy-policy.md"
+					onOpenSource={setSelectedSource}
+				/>
+			)}
+			<Table>
+				<TableHeader>
+					<TableRow>
+						<TableHead>Hierarchy</TableHead>
+						<TableHead>Status</TableHead>
+						<TableHead>Identity / summary</TableHead>
+						<TableHead>Work orders</TableHead>
+						<TableHead>Recent runs</TableHead>
+						<TableHead>Source</TableHead>
+					</TableRow>
+				</TableHeader>
+				<TableBody>{renderRows(rows)}</TableBody>
+			</Table>
+		</div>
+	);
+
 	return (
-		<FactoryPage
-			title="Project Hierarchy"
-			description="Organization and project tree from projects/project-hierarchy.yml, with the active cockpit project highlighted."
-		>
-			<div className="min-h-0 flex-1 overflow-y-auto px-8 py-6">
-				{rows.length === 0 && (
-					<EmptyFactoryState
-						title="No project hierarchy found"
-						body="Add projects/project-hierarchy.yml and project-pipeline hierarchy metadata to render the factory project tree."
-						sourcePath="projects/_shared/foundations/project-hierarchy-policy.md"
-						onOpenSource={setSelectedSource}
-					/>
-				)}
-				<Table>
-					<TableHeader>
-						<TableRow>
-							<TableHead>Hierarchy</TableHead>
-							<TableHead>Status</TableHead>
-							<TableHead>Identity / summary</TableHead>
-							<TableHead>Work orders</TableHead>
-							<TableHead>Recent runs</TableHead>
-							<TableHead>Source</TableHead>
-						</TableRow>
-					</TableHeader>
-					<TableBody>
-						{renderRows(rows)}
-					</TableBody>
-				</Table>
-			</div>
+		<>
+			<LDPSurface
+				title="Project Hierarchy"
+				description="Organization and project tree from projects/project-hierarchy.yml, with the active cockpit project highlighted."
+				status={status}
+				primaryAgent={PROJECTS_AGENT}
+				turns={ldp.turns}
+				readPane={readPane}
+				inputValue={ldp.inputValue}
+				inputPlaceholder="Ask PROJECT_HEALTH_MONITOR about project health, hierarchy, or active-project focus..."
+				isThinking={ldp.isThinking}
+				thinkingLabel={ldp.thinkingLabel}
+				onInputChange={ldp.setInputValue}
+				onSubmit={ldp.submit}
+			/>
 			<DocumentSheet
 				path={selectedSource}
 				title="Project source"
 				onOpenChange={(open) => !open && setSelectedSource(null)}
 			/>
-		</FactoryPage>
+			{ldp.streamElement}
+		</>
 	);
 }
