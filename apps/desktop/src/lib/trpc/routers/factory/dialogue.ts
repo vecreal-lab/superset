@@ -16,6 +16,10 @@ import {
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import {
+	FOUNDATION_OWNER_IDENTITY,
+	isFoundationClassPath,
+} from "shared/factory-foundation-class";
 import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 import { observable } from "@trpc/server/observable";
 import { z } from "zod";
@@ -109,6 +113,29 @@ async function readProjectFoundations(root: string, project: string): Promise<st
 	return chunks.join("\n\n");
 }
 
+async function readFoundationReviewScopeForPrompt(
+	root: string,
+	documentPath?: string,
+): Promise<string> {
+	if (!documentPath || !isFoundationClassPath(documentPath)) return "";
+	const scope = await getFactoryDialogueStore().getFoundationReviewScope(documentPath);
+	const chunks: string[] = [
+		`Foundation-class mode is active for ${documentPath}. Only ${FOUNDATION_OWNER_IDENTITY} can commit this surface.`,
+		`Holistic review folder: ${scope.foundationsFolder || "(none)"}`,
+		`Foundation files: ${scope.foundationFiles.length ? scope.foundationFiles.join(", ") : "(none)"}`,
+		`Citing docs: ${scope.citingDocs.length ? scope.citingDocs.join(", ") : "(none)"}`,
+	];
+	for (const relativePath of scope.foundationFiles) {
+		const content = await readOptionalFile(root, relativePath);
+		chunks.push(`--- foundation file: ${relativePath} ---\n${truncateForPrompt(content, 25_000)}`);
+	}
+	for (const relativePath of scope.citingDocs) {
+		const content = await readOptionalFile(root, relativePath);
+		chunks.push(`--- citing doc: ${relativePath} ---\n${truncateForPrompt(content, 20_000)}`);
+	}
+	return chunks.join("\n\n");
+}
+
 function formatHistory(messages: DialogueMessage[]): string {
 	return messages
 		.slice(-12)
@@ -143,6 +170,10 @@ async function buildRolePrompt(input: {
 		? await readOptionalFile(input.root, input.documentPath)
 		: "";
 	const projectFoundations = await readProjectFoundations(input.root, input.project);
+	const foundationReviewScope = await readFoundationReviewScopeForPrompt(
+		input.root,
+		input.documentPath,
+	);
 	const ldpExcerpt = await readOptionalFile(
 		input.root,
 		"projects/software-factory/foundations/living-document-pattern.md",
@@ -175,6 +206,13 @@ async function buildRolePrompt(input: {
 		"",
 		input.documentPath
 			? `## Current Surface Document\nSource: ${input.documentPath}\n\n${truncateForPrompt(documentContent, 70_000)}`
+			: "",
+		"",
+		foundationReviewScope
+			? `## Foundation-Class Holistic Review Scope\n${truncateForPrompt(
+					foundationReviewScope,
+					120_000,
+				)}`
 			: "",
 		"",
 		"## Active Project Foundations",
@@ -425,6 +463,9 @@ export const createDialogueRouter = () =>
 			.input(
 				dialogueIdentitySchema.extend({
 					notes: z.string().max(20_000).optional(),
+					operatorName: z.string().max(120).optional(),
+					operatorReason: z.string().max(20_000).optional(),
+					visualDiffConfirmed: z.boolean().optional(),
 					documentPath: z.string().min(1).max(1_000).optional(),
 					documentBefore: z.string().max(2_000_000).optional(),
 					documentAfter: z.string().max(2_000_000).optional(),

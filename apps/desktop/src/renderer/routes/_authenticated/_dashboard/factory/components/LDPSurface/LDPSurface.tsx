@@ -11,6 +11,7 @@ export function LDPSurface({
 	primaryAgent,
 	turns,
 	readPane,
+	visualDiffPane,
 	inputValue,
 	inputPlaceholder,
 	isThinking,
@@ -26,7 +27,10 @@ export function LDPSurface({
 					<div className="border-b p-4">
 						<LDPStatusHeader summary={status} />
 					</div>
-					<div className="px-8 py-6">{readPane}</div>
+					<div className="space-y-4 px-8 py-6">
+						{visualDiffPane}
+						{readPane}
+					</div>
 				</main>
 				<aside className="flex min-h-0 flex-col">
 					<LDPChatPane
