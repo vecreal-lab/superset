@@ -8,6 +8,7 @@ import { publicProcedure, router } from "../..";
 import { createFactoryCliRouter } from "./cli";
 import { createDialogueRouter } from "./dialogue";
 import { createFactoryIntakeRouter } from "./intake";
+import { createFactoryLessonsRouter } from "./lessons";
 import { createFactoryStrategyPulseRouter } from "./strategy-pulse";
 
 const datasetSchema = z.enum(FACTORY_DATASETS);
@@ -17,6 +18,7 @@ export const createFactoryRouter = () =>
 		cli: createFactoryCliRouter(),
 		dialogue: createDialogueRouter(),
 		intake: createFactoryIntakeRouter(),
+		lessons: createFactoryLessonsRouter(),
 		strategyPulse: createFactoryStrategyPulseRouter(),
 		summary: publicProcedure.query(async () => {
 			return getFactoryReadModel().summary();
