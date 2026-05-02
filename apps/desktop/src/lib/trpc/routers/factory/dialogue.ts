@@ -16,6 +16,7 @@ import {
 import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 import { observable } from "@trpc/server/observable";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
@@ -73,12 +74,6 @@ type DialogueStreamEvent =
 			dialogue: DialogueRecord;
 			messages: DialogueMessage[];
 	  };
-
-function isChangeProposal(message: string): boolean {
-	return /\b(change|edit|update|rewrite|replace|revise|strengthen\w*|weaken\w*|remove|add)\b/i.test(
-		message,
-	);
-}
 
 function isConcreteCommit(message: string): boolean {
 	return /\b(approved|approve|confirm|confirmed|ship it|do it|go|commit)\b/i.test(
@@ -333,7 +328,7 @@ export const createDialogueRouter = () =>
 						const impactRole = store.getImpactSpecialist(input.surface);
 						const shouldRunImpact =
 							Boolean(impactRole) &&
-							isChangeProposal(input.message) &&
+							isChangeProposalIntent(input.message) &&
 							!isConcreteCommit(input.message);
 						if (impactRole && shouldRunImpact) {
 							const impactProvider = providerForRole(impactRole);

@@ -6,6 +6,7 @@ import {
 	projectFoundationPath,
 	useActiveProjectId,
 } from "renderer/stores/active-project";
+import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 import {
 	LDPSurface,
 	type LDPDialogueTurn,
@@ -84,12 +85,6 @@ function countTktk(content: string): number {
 	return content.match(/TKTK/gi)?.length ?? 0;
 }
 
-function isChangeProposal(message: string): boolean {
-	return /\b(change|edit|update|rewrite|replace|revise|strengthen\w*|weaken\w*|remove|add)\b/i.test(
-		message,
-	);
-}
-
 function isConcreteCommit(message: string): boolean {
 	return /\b(approved|approve|confirm|confirmed|ship it|do it|go|commit)\b/i.test(
 		message,
@@ -116,7 +111,7 @@ function buildPendingDocumentAfter(content: string, message: string): string | n
 	if (/\brevert\b/i.test(message) && content.includes("> LDP smoke edit preview:")) {
 		return removeLdpEditPreview(content);
 	}
-	if (isChangeProposal(message)) {
+	if (isChangeProposalIntent(message)) {
 		return appendLdpEditPreview(content, message);
 	}
 	return null;

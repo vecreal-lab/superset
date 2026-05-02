@@ -9,6 +9,7 @@ import {
 	writeFile,
 } from "node:fs/promises";
 import path from "node:path";
+import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 
 export const DIALOGUE_STATES = [
 	"needs_reply",
@@ -256,12 +257,6 @@ function isConcreteCommitPhrase(normalized: string): boolean {
 	);
 }
 
-function isChangeProposal(normalized: string): boolean {
-	return /\b(change|edit|update|rewrite|replace|revise|strengthen\w*|weaken\w*|remove|add)\b/.test(
-		normalized,
-	);
-}
-
 function inferNextState(message: string, previousState?: DialogueState): DialogueState {
 	const normalized = message.trim().toLowerCase();
 	if (isAmbiguousCommitPhrase(normalized)) {
@@ -273,7 +268,7 @@ function inferNextState(message: string, previousState?: DialogueState): Dialogu
 			? "awaiting_commit"
 			: "awaiting_confirmation";
 	}
-	if (isChangeProposal(normalized)) {
+	if (isChangeProposalIntent(normalized)) {
 		return "awaiting_commit";
 	}
 	return "needs_reply";
