@@ -10,9 +10,12 @@ import {
 } from "@superset/ui/table";
 import { cn } from "@superset/ui/utils";
 import { Archive, RotateCcw, Search, Undo2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type KeyboardEvent, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
-import { useActiveProjectId } from "renderer/stores/active-project";
+import {
+	useActiveProjectId,
+	useSetActiveProjectId,
+} from "renderer/stores/active-project";
 import { FactorySearch, formatDate } from "../FactoryView";
 import type { DialogueRecord, DialogueState } from "../../hooks/useDialogueAttentionCounts";
 
@@ -28,6 +31,21 @@ const STATE_OPTIONS: Array<{ value: "all" | DialogueState; label: string }> = [
 	{ value: "abandoned", label: "Abandoned" },
 	{ value: "committed_resolved", label: "Committed and resolved" },
 ];
+
+const SURFACE_ROUTES: Record<string, string> = {
+	home: "/factory",
+	mission: "/factory/mission",
+	foundations: "/factory/foundations",
+	"work-orders": "/factory/work-orders",
+	approvals: "/factory/approvals",
+	"strategy-pulse": "/factory/strategy-pulse",
+	roles: "/factory/roles",
+	"build-vs-compose": "/factory/build-vs-compose",
+	decisions: "/factory/decisions",
+	lessons: "/factory/lessons",
+	projects: "/factory/projects",
+	dialogues: "/factory/dialogues",
+};
 
 function stateLabel(state: string): string {
 	return state.replace(/_/g, " ");
@@ -49,8 +67,13 @@ function stateTone(state: DialogueState): "secondary" | "outline" | "destructive
 	return "outline";
 }
 
+function routeForSurface(surface: string): string {
+	return SURFACE_ROUTES[surface] || "/factory/dialogues";
+}
+
 export function LDPInbox() {
 	const activeProjectId = useActiveProjectId();
+	const setActiveProjectId = useSetActiveProjectId();
 	const utils = electronTrpc.useUtils();
 	const [query, setQuery] = useState("");
 	const [stateFilter, setStateFilter] = useState<"all" | DialogueState>("all");
@@ -94,11 +117,25 @@ export function LDPInbox() {
 		dialogue: DialogueRecord,
 	) {
 		await mutation.mutateAsync({
-			project: activeProjectId,
+			project: dialogue.project,
 			surface: dialogue.surface,
 			dialogueId: dialogue.id,
 		});
 		await refreshDialogueQueries();
+	}
+
+	function openDialogue(dialogue: DialogueRecord) {
+		setActiveProjectId(dialogue.project);
+		window.location.hash = `${routeForSurface(dialogue.surface)}?dialogueId=${encodeURIComponent(dialogue.id)}`;
+	}
+
+	function handleRowKeyDown(
+		event: KeyboardEvent<HTMLTableRowElement>,
+		dialogue: DialogueRecord,
+	) {
+		if (event.key !== "Enter" && event.key !== " ") return;
+		event.preventDefault();
+		openDialogue(dialogue);
 	}
 
 	return (
@@ -147,7 +184,14 @@ export function LDPInbox() {
 						{rows.map((dialogue) => (
 							<TableRow
 								key={`${dialogue.surface}-${dialogue.id}`}
-								className={cn(dialogue.archived && "opacity-70")}
+								role="button"
+								tabIndex={0}
+								className={cn(
+									"cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+									dialogue.archived && "opacity-70",
+								)}
+								onClick={() => openDialogue(dialogue)}
+								onKeyDown={(event) => handleRowKeyDown(event, dialogue)}
 							>
 								<TableCell className="max-w-xs whitespace-normal">
 									<div className="font-medium">{dialogue.title}</div>
@@ -170,7 +214,11 @@ export function LDPInbox() {
 									{formatDate(dialogue.last_activity_at)}
 								</TableCell>
 								<TableCell>
-									<div className="flex flex-wrap gap-1.5">
+									<div
+										className="flex flex-wrap gap-1.5"
+										onClick={(event) => event.stopPropagation()}
+										onKeyDown={(event) => event.stopPropagation()}
+									>
 										<Button
 											type="button"
 											size="xs"

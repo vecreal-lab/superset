@@ -48,10 +48,18 @@ export const createDialogueRouter = () =>
 			.input(
 				dialogueIdentitySchema.extend({
 					notes: z.string().max(20_000).optional(),
+					documentPath: z.string().min(1).max(1_000).optional(),
+					documentBefore: z.string().max(2_000_000).optional(),
+					documentAfter: z.string().max(2_000_000).optional(),
 				}),
 			)
 			.mutation(async ({ input }) => {
 				return getFactoryDialogueStore().commit(input);
+			}),
+		get: publicProcedure
+			.input(dialogueIdentitySchema)
+			.query(async ({ input }) => {
+				return getFactoryDialogueStore().get(input);
 			}),
 		abandon: publicProcedure
 			.input(dialogueIdentitySchema)

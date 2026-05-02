@@ -68,6 +68,21 @@ export interface DialogueTurnResult {
 	agent_message: DialogueMessage;
 }
 
+export interface DialogueReadResult {
+	dialogue: DialogueRecord;
+	messages: DialogueMessage[];
+}
+
+export interface DialogueCommitInput {
+	project?: string;
+	surface: string;
+	dialogueId: string;
+	notes?: string;
+	documentPath?: string;
+	documentBefore?: string;
+	documentAfter?: string;
+}
+
 export interface DialogueAttentionCounts {
 	total: number;
 	by_project: Record<string, number>;
@@ -210,6 +225,14 @@ function surfacePrimaryAgent(surface: string): string {
 	return SURFACE_PRIMARY_AGENTS[normalized] || "ORCH";
 }
 
+function surfaceImpactSpecialist(surface: string): string | null {
+	const normalized = surfaceSegments(surface).at(0) || "home";
+	if (normalized === "mission" || normalized === "foundations") {
+		return "STRATEGY_STEWARD";
+	}
+	return null;
+}
+
 function operatorSurfaceKey(surface: string): string | null {
 	const normalized = surfaceSegments(surface).at(0);
 	return normalized && SURFACE_PRIMARY_AGENTS[normalized] ? normalized : null;
@@ -226,7 +249,9 @@ function isConcreteCommitPhrase(normalized: string): boolean {
 }
 
 function isChangeProposal(normalized: string): boolean {
-	return /\b(change|edit|update|rewrite|replace|revise)\b/.test(normalized);
+	return /\b(change|edit|update|rewrite|replace|revise|strengthen\w*|weaken\w*|remove|add)\b/.test(
+		normalized,
+	);
 }
 
 function inferNextState(message: string, previousState?: DialogueState): DialogueState {
@@ -235,7 +260,8 @@ function inferNextState(message: string, previousState?: DialogueState): Dialogu
 		return "awaiting_confirmation";
 	}
 	if (isConcreteCommitPhrase(normalized)) {
-		return previousState === "awaiting_commit"
+		return previousState === "awaiting_commit" ||
+			previousState === "awaiting_confirmation"
 			? "awaiting_commit"
 			: "awaiting_confirmation";
 	}
@@ -254,8 +280,12 @@ function dialogueStewardResponse(input: {
 }): string {
 	const target = surfaceLabel(input.surface);
 	const primaryAgent = surfacePrimaryAgent(input.surface);
+	const impactSpecialist = surfaceImpactSpecialist(input.surface);
+	const impactLine = impactSpecialist
+		? ` ${impactSpecialist} handles impact analysis before downstream work is spawned.`
+		: "";
 	const normalized = input.message.trim().toLowerCase();
-	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.`;
+	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.${impactLine}`;
 
 	if (input.state === "awaiting_confirmation") {
 		return `${lead}\n\nI am treating this as not clear enough to commit yet. Restate-and-ask: do you want me to change the ${target} source, or were you confirming the direction conversationally? Reply with the exact change or an explicit approval after the proposal is clear.`;
@@ -263,7 +293,8 @@ function dialogueStewardResponse(input: {
 	if (
 		input.state === "awaiting_commit" &&
 		isConcreteCommitPhrase(normalized) &&
-		input.previousState === "awaiting_commit"
+		(input.previousState === "awaiting_commit" ||
+			input.previousState === "awaiting_confirmation")
 	) {
 		return `${lead}\n\nConcrete approval received after a clear proposal. I am ready for the commit action; when you commit, I will preserve the audit trail and surface cascade links to /factory/work-orders and /factory/approvals.`;
 	}
@@ -538,18 +569,79 @@ export class FactoryDialogueStore {
 		return { dialogue, messages, agent_message: agentMessage };
 	}
 
-	async commit(input: {
-		project?: string;
+	private resolveWritableDocument(input: {
+		project: string;
 		surface: string;
-		dialogueId: string;
-		notes?: string;
-	}): Promise<DialogueRecord> {
+		documentPath: string;
+	}): string {
+		const documentPath = normalizeSlashes(input.documentPath);
+		const expectedMissionPath = `projects/${input.project}/foundations/mission.md`;
+		if (
+			surfaceSegments(input.surface).at(0) === "mission" &&
+			documentPath !== expectedMissionPath
+		) {
+			throw new Error(
+				`Mission commits must write the active project's mission source: ${expectedMissionPath}`,
+			);
+		}
+		const resolved = path.resolve(this.root, documentPath);
+		if (!isInsidePath(this.root, resolved)) {
+			throw new Error(`Document write must stay inside the factory repo: ${documentPath}`);
+		}
+		return resolved;
+	}
+
+	private async writeDocumentCommit(
+		directory: string,
+		input: Required<Pick<DialogueCommitInput, "documentPath" | "documentAfter">> &
+			Pick<DialogueCommitInput, "documentBefore"> & {
+				project: string;
+				surface: string;
+			},
+	): Promise<void> {
+		const documentPath = normalizeSlashes(input.documentPath);
+		const filePath = this.resolveWritableDocument({
+			project: input.project,
+			surface: input.surface,
+			documentPath,
+		});
+		const current = existsSync(filePath) ? await readFile(filePath, "utf8") : "";
+		if (input.documentBefore !== undefined && current !== input.documentBefore) {
+			throw new Error(`Document changed before commit could apply: ${documentPath}`);
+		}
+		await writeFile(filePath, input.documentAfter, "utf8");
+		await this.appendAudit(directory, "document_written", {
+			project: input.project,
+			surface: input.surface,
+			document_path: documentPath,
+			bytes_before: String(current.length),
+			bytes_after: String(input.documentAfter.length),
+		});
+	}
+
+	async commit(input: DialogueCommitInput): Promise<DialogueRecord> {
 		const project = projectSegment(input.project);
 		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
+		const existing = await this.readDialogue(directory);
+		if (!existing) {
+			throw new Error(
+				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
+			);
+		}
+		if (input.documentPath && input.documentAfter !== undefined) {
+			await this.writeDocumentCommit(directory, {
+				project,
+				surface: input.surface,
+				documentPath: input.documentPath,
+				documentBefore: input.documentBefore,
+				documentAfter: input.documentAfter,
+			});
+		}
 		const cascadeId = `WO-LDP-CASCADE-${input.dialogueId.slice(0, 8).toUpperCase()}`;
 		await this.appendAudit(directory, "commit_requested", {
 			project,
 			notes: input.notes || "",
+			document_path: input.documentPath || "",
 			dialogue_steward_bridge: true,
 			cascade_work_order: `/factory/work-orders/${cascadeId}`,
 			approval_queue: "/factory/approvals",
@@ -560,12 +652,31 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
-			content: `Commit recorded. Cascade draft links: [${cascadeId}](/factory/work-orders/${cascadeId}) and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
+			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: [${cascadeId}](/factory/work-orders/${cascadeId}) and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
 			created_at: nowIso(),
 		});
 		return this.updateDialogueState(project, input.surface, input.dialogueId, "cascade_pending", {
 			auditEvent: "commit_recorded",
 		});
+	}
+
+	async get(input: {
+		project?: string;
+		surface: string;
+		dialogueId: string;
+	}): Promise<DialogueReadResult> {
+		const project = projectSegment(input.project);
+		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
+		const dialogue = await this.readDialogue(directory);
+		if (!dialogue) {
+			throw new Error(
+				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
+			);
+		}
+		return {
+			dialogue,
+			messages: await this.readMessages(directory),
+		};
 	}
 
 	async abandon(
