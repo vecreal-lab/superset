@@ -35,6 +35,46 @@ export interface FactoryCliInvokeInput {
 	onChunk?: (chunk: string) => void;
 }
 
+export interface FactoryCliGoalIterativeVerificationCommand {
+	command: string;
+	required?: boolean;
+}
+
+export interface FactoryCliGoalIterativeInput {
+	workOrderId: string;
+	prompt: string;
+	allowedPaths: string[];
+	verificationCommands: FactoryCliGoalIterativeVerificationCommand[];
+	maxIterations?: number;
+	maxRuntimeMinutes?: number;
+	signal?: AbortSignal;
+	onChunk?: (chunk: string) => void;
+}
+
+export interface FactoryCliGoalIterativeVerificationOutcome {
+	command: string;
+	exitCode: number;
+	stdout: string;
+	stderr: string;
+	durationMs: number;
+}
+
+export interface FactoryCliGoalIterativeIteration {
+	iteration: number;
+	codexExitCode: number;
+	codexStdout: string;
+	codexStderr: string;
+	verification: FactoryCliGoalIterativeVerificationOutcome[];
+}
+
+export interface FactoryCliGoalIterativeResult {
+	success: boolean;
+	iterations: FactoryCliGoalIterativeIteration[];
+	spawned: number;
+	cleaned: number;
+	failureReason?: string;
+}
+
 interface CommandResult {
 	exitCode: number;
 	stdout: string;
@@ -45,6 +85,8 @@ interface CommandResult {
 const CLI_STATUS_TTL_MS = 5 * 60 * 1000;
 const HEALTH_TIMEOUT_MS = 90_000;
 const INVOCATION_TIMEOUT_MS = 10 * 60_000;
+const GOAL_ITERATIVE_DEFAULT_MAX_ITERATIONS = 10;
+const GOAL_ITERATIVE_DEFAULT_MAX_RUNTIME_MINUTES = 120;
 const CLAUDE_MODEL = "claude-opus-4-7";
 const CODEX_MODEL = "gpt-5.4";
 
@@ -513,6 +555,229 @@ export async function invokeFactoryCliRole(
 		spawned: 1,
 		cleaned: 1,
 	};
+}
+
+export async function invokeFactoryCliGoalIterative(
+	input: FactoryCliGoalIterativeInput,
+): Promise<FactoryCliGoalIterativeResult> {
+	const status = await checkProvider("codex", true);
+	if (!status.connected) {
+		return {
+			success: false,
+			iterations: [],
+			spawned: 0,
+			cleaned: 0,
+			failureReason: status.details || status.message,
+		};
+	}
+
+	const pathBlock = goalIterativePathBlock(input.allowedPaths);
+	if (pathBlock) {
+		return {
+			success: false,
+			iterations: [],
+			spawned: 0,
+			cleaned: 0,
+			failureReason: pathBlock,
+		};
+	}
+
+	const maxIterations = positiveInt(
+		input.maxIterations,
+		GOAL_ITERATIVE_DEFAULT_MAX_ITERATIONS,
+	);
+	const maxRuntimeMs =
+		positiveInt(
+			input.maxRuntimeMinutes,
+			GOAL_ITERATIVE_DEFAULT_MAX_RUNTIME_MINUTES,
+		) * 60_000;
+	const startedAtMs = Date.now();
+	const factoryRoot = findFactoryRoot();
+	const allowedDirs = goalIterativeAllowedDirs(factoryRoot, input.allowedPaths);
+	const iterations: FactoryCliGoalIterativeIteration[] = [];
+	let prompt = input.prompt;
+	let useResume = false;
+
+	for (let iteration = 1; iteration <= maxIterations; iteration += 1) {
+		if (Date.now() - startedAtMs > maxRuntimeMs) {
+			return {
+				success: false,
+				iterations,
+				spawned: iterations.length,
+				cleaned: iterations.length,
+				failureReason: `max_runtime_minutes hit before iteration ${iteration}`,
+			};
+		}
+
+		const codexResult = await runCommand(
+			"codex",
+			goalIterativeCodexArgs(factoryRoot, allowedDirs, useResume),
+			{
+				input: prompt,
+				timeoutMs: Math.max(30_000, maxRuntimeMs - (Date.now() - startedAtMs)),
+				signal: input.signal,
+				onStdout: input.onChunk,
+			},
+		);
+
+		if (codexResult.exitCode !== 0) {
+			iterations.push({
+				iteration,
+				codexExitCode: codexResult.exitCode,
+				codexStdout: codexResult.stdout,
+				codexStderr: codexResult.stderr,
+				verification: [],
+			});
+			return {
+				success: false,
+				iterations,
+				spawned: iterations.length,
+				cleaned: iterations.length,
+				failureReason: codexResult.stderr || codexResult.stdout,
+			};
+		}
+
+		const verification: FactoryCliGoalIterativeVerificationOutcome[] = [];
+		for (const verificationCommand of input.verificationCommands.filter(
+			(item) => item.required !== false,
+		)) {
+			const started = Date.now();
+			const result = await runShellCommand(verificationCommand.command, input.signal);
+			verification.push({
+				command: verificationCommand.command,
+				exitCode: result.exitCode,
+				stdout: result.stdout,
+				stderr: result.stderr,
+				durationMs: Date.now() - started,
+			});
+		}
+
+		iterations.push({
+			iteration,
+			codexExitCode: codexResult.exitCode,
+			codexStdout: codexResult.stdout,
+			codexStderr: codexResult.stderr,
+			verification,
+		});
+
+		if (verification.every((item) => item.exitCode === 0)) {
+			return {
+				success: true,
+				iterations,
+				spawned: iterations.length + verification.length,
+				cleaned: iterations.length + verification.length,
+			};
+		}
+
+		prompt = [
+			`Continue work order ${input.workOrderId}.`,
+			"",
+			"The previous iteration did not pass verification. Fix only the failing checks and stay inside allowed paths.",
+			"",
+			"## Verification output",
+			"",
+			...verification.map((item) =>
+				[
+					`### ${item.command}`,
+					`Exit code: ${item.exitCode}`,
+					"```text",
+					[item.stdout, item.stderr].filter(Boolean).join("\n\n"),
+					"```",
+				].join("\n"),
+			),
+		].join("\n");
+		useResume = true;
+	}
+
+	return {
+		success: false,
+		iterations,
+		spawned: iterations.length,
+		cleaned: iterations.length,
+		failureReason: `max_iterations hit (${maxIterations})`,
+	};
+}
+
+function goalIterativeCodexArgs(
+	factoryRoot: string,
+	allowedDirs: string[],
+	resume: boolean,
+): string[] {
+	const common = [
+		"-m",
+		CODEX_MODEL,
+		"-c",
+		'model_reasoning_effort="xhigh"',
+		"-c",
+		'model_reasoning_summary="detailed"',
+		"-c",
+		'approval_policy="never"',
+		"--full-auto",
+		"--skip-git-repo-check",
+	];
+	if (resume) return ["exec", "resume", "--last", ...common, "-"];
+	return [
+		"exec",
+		...common,
+		"--sandbox",
+		"workspace-write",
+		"--cd",
+		factoryRoot,
+		...allowedDirs.flatMap((dir) => ["--add-dir", dir]),
+		"-",
+	];
+}
+
+function goalIterativeAllowedDirs(factoryRoot: string, allowedPaths: string[]): string[] {
+	const dirs = new Set<string>();
+	for (const allowedPath of allowedPaths) {
+		const normalized = normalizeSlashes(allowedPath).replace(/^\.\//, "");
+		const rootPart = normalized.replace(/[*?].*$/, "").replace(/\/+$/, "");
+		const looksLikeFile = Boolean(path.extname(rootPart));
+		const relativeDir = looksLikeFile ? path.dirname(rootPart) : rootPart || ".";
+		dirs.add(path.resolve(factoryRoot, relativeDir === "." ? "" : relativeDir));
+	}
+	return [...dirs].sort();
+}
+
+function goalIterativePathBlock(allowedPaths: string[]): string | undefined {
+	for (const allowedPath of allowedPaths) {
+		const normalized = normalizeSlashes(allowedPath).replace(/^\.\//, "");
+		if (/^projects\/_shared\/foundations(?:\/|$)/.test(normalized)) {
+			return `foundation-class-block: ${allowedPath}`;
+		}
+		if (/^projects\/[^/]+\/foundations(?:\/|$)/.test(normalized)) {
+			return `foundation-class-block: ${allowedPath}`;
+		}
+		if (/^work-orders(?:\/|$)/.test(normalized)) {
+			return `work-order-path-block: ${allowedPath}`;
+		}
+		if (/^[^/]+\.ya?ml$/i.test(normalized) || /^projects\/[^/]+\.ya?ml$/i.test(normalized)) {
+			return `project-yaml-block: ${allowedPath}`;
+		}
+	}
+	return undefined;
+}
+
+function positiveInt(value: number | undefined, fallback: number): number {
+	if (!Number.isFinite(value) || !value || value < 1) return fallback;
+	return Math.floor(value);
+}
+
+function runShellCommand(command: string, signal?: AbortSignal): Promise<CommandResult> {
+	if (process.platform === "win32") {
+		return runCommand("powershell.exe", [
+			"-NoProfile",
+			"-ExecutionPolicy",
+			"Bypass",
+			"-Command",
+			command,
+		], { timeoutMs: INVOCATION_TIMEOUT_MS, signal });
+	}
+	return runCommand("bash", ["-lc", command], {
+		timeoutMs: INVOCATION_TIMEOUT_MS,
+		signal,
+	});
 }
 
 export function providerForRole(roleId: string): FactoryCliProvider {
