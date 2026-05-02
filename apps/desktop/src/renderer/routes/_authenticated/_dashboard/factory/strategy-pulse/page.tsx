@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import { toast } from "@superset/ui/sonner";
 import { useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useActiveProjectId } from "renderer/stores/active-project";
@@ -18,6 +19,11 @@ import {
 	type LDPDialogueAgent,
 	type LDPStatusSummary,
 } from "../components/LDPSurface";
+import {
+	StrategyCandidateList,
+	type StrategyLedgerCandidate,
+} from "../components/StrategyCandidateList";
+import { StrategyLedgerPromotePreview } from "../components/StrategyLedgerPromotePreview";
 
 export const Route = createFileRoute(
 	"/_authenticated/_dashboard/factory/strategy-pulse/",
@@ -37,14 +43,24 @@ const STRATEGY_AGENT: LDPDialogueAgent = {
 
 function StrategyPulsePage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
+	const [candidateToPromote, setCandidateToPromote] =
+		useState<StrategyLedgerCandidate | null>(null);
 	const activeProjectId = useActiveProjectId();
 	const search = Route.useSearch();
 	const navigate = useNavigate();
+	const utils = electronTrpc.useUtils();
 	const roles = electronTrpc.factory.dataset.useQuery({ dataset: "roles" });
 	const runs = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "runs" },
 		{ refetchInterval: 5000 },
 	);
+	const ledgerCandidates =
+		electronTrpc.factory.strategyPulse.listLedgerCandidates.useQuery(
+			{ include_resolved: true },
+			{ refetchInterval: 5000 },
+		);
+	const declineCandidate =
+		electronTrpc.factory.strategyPulse.declineCandidate.useMutation();
 	const ldp = useLDPSurfaceDialogue({
 		project: activeProjectId,
 		surface: "strategy-pulse",
@@ -84,6 +100,10 @@ function StrategyPulsePage() {
 		"Operating principles audit + build-vs-compose matrix drift",
 		"Open strategic questions for Yuriy",
 	];
+	const pendingCandidateCount = (ledgerCandidates.data || []).filter(
+		(candidate: StrategyLedgerCandidate) =>
+			candidate.status === "pending_review",
+	).length;
 	const latestPulse = pulseRuns
 		.slice()
 		.sort((a, b) => String(b.modified_at || "").localeCompare(String(a.modified_at || "")))
@@ -99,6 +119,11 @@ function StrategyPulsePage() {
 			{ label: "Pulse runs", value: pulseRuns.length },
 			{ label: "Strategy lanes", value: lanes.length },
 			{
+				label: "Intake candidates",
+				value: pendingCandidateCount,
+				tone: pendingCandidateCount ? "warning" : "default",
+			},
+			{
 				label: "Latest status",
 				value: latestPulse?.status || "not run",
 				tone: latestPulse ? "default" : "warning",
@@ -110,6 +135,30 @@ function StrategyPulsePage() {
 			},
 		],
 		flags: [{ label: `Active project: ${activeProjectId}` }],
+	};
+
+	const handleAskCandidate = (candidate: StrategyLedgerCandidate) => {
+		ldp.setInputValue(
+			`@${candidate.id} — what's the moat implication?\n\nFinding: ${candidate.finding}\nSource intake: ${candidate.source_intake}`,
+		);
+	};
+
+	const handleDeclineCandidate = async (candidate: StrategyLedgerCandidate) => {
+		const rationale = window.prompt(
+			"Optional free-form rationale for declining this strategy candidate:",
+			candidate.decline_reason || "",
+		);
+		if (rationale === null) return;
+		try {
+			await declineCandidate.mutateAsync({
+				candidate_id: candidate.id,
+				rationale,
+			});
+			await utils.factory.strategyPulse.listLedgerCandidates.invalidate();
+			toast.success("Strategy candidate declined.");
+		} catch (error) {
+			toast.error(error instanceof Error ? error.message : "Decline failed.");
+		}
 	};
 
 	const readPane = (
@@ -142,6 +191,21 @@ function StrategyPulsePage() {
 					</div>
 				</FactorySection>
 			)}
+
+			<FactorySection
+				title="Strategy Ledger candidates"
+				description="Intake-sourced strategic signals awaiting STRATEGY_STEWARD review."
+			>
+				<StrategyCandidateList
+					candidates={(ledgerCandidates.data || []) as StrategyLedgerCandidate[]}
+					isLoading={ledgerCandidates.isLoading}
+					errorMessage={ledgerCandidates.error?.message}
+					onAskCandidate={handleAskCandidate}
+					onPromoteCandidate={setCandidateToPromote}
+					onDeclineCandidate={handleDeclineCandidate}
+					onOpenSource={setSelectedSource}
+				/>
+			</FactorySection>
 
 			<div className="grid gap-4 lg:grid-cols-2">
 				{lanes.map((lane) => (
@@ -179,6 +243,14 @@ function StrategyPulsePage() {
 				path={selectedSource}
 				title="Strategy source"
 				onOpenChange={(open) => !open && setSelectedSource(null)}
+			/>
+			<StrategyLedgerPromotePreview
+				candidate={candidateToPromote}
+				open={!!candidateToPromote}
+				lastOperatorMessage={ldp.inputValue}
+				onOpenChange={(open) => !open && setCandidateToPromote(null)}
+				onOpenSource={setSelectedSource}
+				onPromoted={() => setCandidateToPromote(null)}
 			/>
 			{ldp.streamElement}
 		</>
