@@ -14,6 +14,7 @@ export function LDPSurface({
 	inputValue,
 	inputPlaceholder,
 	isThinking,
+	thinkingLabel,
 	cascadeDrafts = [],
 	onInputChange,
 	onSubmit,
@@ -34,6 +35,7 @@ export function LDPSurface({
 						value={inputValue}
 						placeholder={inputPlaceholder}
 						isThinking={isThinking}
+						thinkingLabel={thinkingLabel}
 						onChange={onInputChange}
 						onSubmit={onSubmit}
 					/>

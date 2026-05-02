@@ -80,6 +80,7 @@ export interface LDPSurfaceProps {
 	inputValue: string;
 	inputPlaceholder?: string;
 	isThinking?: boolean;
+	thinkingLabel?: string;
 	cascadeDrafts?: LDPCascadeDraft[];
 	onInputChange: (value: string) => void;
 	onSubmit: () => void;

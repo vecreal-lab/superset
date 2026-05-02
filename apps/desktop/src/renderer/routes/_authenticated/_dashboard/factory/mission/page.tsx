@@ -30,6 +30,52 @@ const MISSION_AGENT = {
 		"Primary Mission LDP steward. STRATEGY_STEWARD is attributed on impact analysis.",
 };
 
+type MissionStreamEvent =
+	| {
+			type: "dialogue" | "complete";
+			dialogue: { id: string; state: string };
+			messages: Parameters<typeof mapTurns>[0];
+	  }
+	| {
+			type: "status";
+			roleId: string;
+			phase: "thinking" | "streaming" | "complete";
+			message: string;
+	  }
+	| {
+			type: "chunk";
+			roleId: string;
+			speaker: string;
+			kind: LDPDialogueTurn["kind"];
+			content: string;
+	  }
+	| {
+			type: "message";
+			message: Parameters<typeof mapTurns>[0][number];
+			dialogue: { id: string; state: string };
+			messages: Parameters<typeof mapTurns>[0];
+	  }
+	| {
+			type: "connection";
+			provider: "claude" | "codex";
+			status: { message: string };
+	  }
+	| {
+			type: "error";
+			provider?: "claude" | "codex";
+			roleId?: string;
+			message: string;
+	  };
+
+interface PendingTurn {
+	key: string;
+	dialogueId?: string;
+	message: string;
+	previousState?: string;
+	documentBefore: string;
+	documentAfter: string | null;
+}
+
 function countSections(content: string): number {
 	return content.match(/^##\s+/gm)?.length ?? 0;
 }
@@ -98,6 +144,36 @@ function mapTurns(messages: Array<{
 	}));
 }
 
+function MissionTurnSubscription({
+	turn,
+	project,
+	documentPath,
+	onEvent,
+	onError,
+}: {
+	turn: PendingTurn;
+	project: string;
+	documentPath: string;
+	onEvent: (event: MissionStreamEvent) => void;
+	onError: (error: unknown) => void;
+}) {
+	electronTrpc.factory.dialogue.sendTurn.useSubscription(
+		{
+			project,
+			surface: "mission",
+			dialogueId: turn.dialogueId,
+			title: "Mission dialogue",
+			message: turn.message,
+			documentPath,
+		},
+		{
+			onData: (event) => onEvent(event as MissionStreamEvent),
+			onError,
+		},
+	);
+	return null;
+}
+
 function MissionPage() {
 	const activeProjectId = useActiveProjectId();
 	const search = Route.useSearch();
@@ -113,6 +189,9 @@ function MissionPage() {
 	const [pendingDocumentAfter, setPendingDocumentAfter] = useState<string | null>(
 		null,
 	);
+	const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
+	const [streamingTurns, setStreamingTurns] = useState<LDPDialogueTurn[]>([]);
+	const [thinkingLabel, setThinkingLabel] = useState<string | undefined>();
 	const documentQuery = electronTrpc.factory.document.useQuery(
 		{ path: missionPath },
 		{ refetchInterval: 5000 },
@@ -126,14 +205,19 @@ function MissionPage() {
 		},
 		{ enabled: Boolean(activeDialogueId), refetchInterval: 5000 },
 	);
-	const startTurnMutation = electronTrpc.factory.dialogue.startTurn.useMutation();
-	const continueTurnMutation = electronTrpc.factory.dialogue.continueTurn.useMutation();
 	const commitMutation = electronTrpc.factory.dialogue.commit.useMutation();
 	const content = documentQuery.data?.content.trimEnd() || "";
 	const turns = useMemo(
 		() => mapTurns(dialogueQuery.data?.messages || []),
 		[dialogueQuery.data?.messages],
 	);
+	const displayedTurns = useMemo(() => {
+		const persistedIds = new Set(turns.map((turn) => turn.id));
+		return [
+			...turns,
+			...streamingTurns.filter((turn) => !persistedIds.has(turn.id)),
+		];
+	}, [streamingTurns, turns]);
 	const cascadeDrafts = useMemo(() => {
 		const dialogue = dialogueQuery.data?.dialogue;
 		if (!dialogue || dialogue.state !== "cascade_pending") return [];
@@ -163,6 +247,9 @@ function MissionPage() {
 		setLocalDialogueId(null);
 		setPendingDocumentBefore(null);
 		setPendingDocumentAfter(null);
+		setPendingTurn(null);
+		setStreamingTurns([]);
+		setThinkingLabel(undefined);
 		if (search.dialogueId) {
 			void navigate({
 				to: "/factory/mission",
@@ -178,6 +265,7 @@ function MissionPage() {
 			utils.factory.dialogue.get.invalidate(),
 			utils.factory.dialogue.list.invalidate(),
 			utils.factory.dialogue.attentionCounts.invalidate(),
+			utils.factory.cli.status.invalidate(),
 		]);
 	}
 
@@ -224,32 +312,119 @@ function MissionPage() {
 			setPendingDocumentAfter(pendingAfter);
 		}
 
-		if (!activeDialogueId) {
-			const result = await startTurnMutation.mutateAsync({
-				project: activeProjectId,
-				surface: "mission",
-				title: "Mission dialogue",
-				message,
-			});
-			setLocalDialogueId(result.dialogue.id);
-			await navigate({
-				to: "/factory/mission",
-				search: { dialogueId: result.dialogue.id },
-				replace: true,
-			});
-			await refreshMissionQueries();
-			return;
-		}
-
 		const previousState = dialogueQuery.data?.dialogue.state;
-		const result = await continueTurnMutation.mutateAsync({
-			project: activeProjectId,
-			surface: "mission",
+		setThinkingLabel(`${MISSION_AGENT.roleId} is thinking...`);
+		setPendingTurn({
+			key: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
 			dialogueId: activeDialogueId,
 			message,
+			previousState,
+			documentBefore: pendingDocumentBefore || content,
+			documentAfter: pendingAfter && pendingAfter !== content ? pendingAfter : null,
 		});
-		await refreshMissionQueries();
-		await maybeCommitAfterConcreteApproval(result.dialogue.id, message, previousState);
+	}
+
+	async function handleStreamEvent(event: MissionStreamEvent) {
+		if (event.type === "dialogue") {
+			setLocalDialogueId(event.dialogue.id);
+			setStreamingTurns(mapTurns(event.messages));
+			if (!activeDialogueId) {
+				await navigate({
+					to: "/factory/mission",
+					search: { dialogueId: event.dialogue.id },
+					replace: true,
+				});
+			}
+			return;
+		}
+		if (event.type === "status") {
+			setThinkingLabel(
+				event.phase === "complete" ? undefined : event.message || `${event.roleId} is thinking...`,
+			);
+			return;
+		}
+		if (event.type === "chunk" && pendingTurn) {
+			setThinkingLabel(`${event.roleId} is answering...`);
+			const streamId = `${pendingTurn.key}-${event.roleId}`;
+			setStreamingTurns((previous) => {
+				const existing = previous.find((turn) => turn.id === streamId);
+				if (!existing) {
+					return [
+						...previous,
+						{
+							id: streamId,
+							kind: event.kind,
+							speaker: event.speaker,
+							roleId: event.roleId,
+							content: event.content,
+							timestamp: new Date().toISOString(),
+						},
+					];
+				}
+				return previous.map((turn) =>
+					turn.id === streamId
+						? { ...turn, content: `${turn.content}${event.content}` }
+						: turn,
+				);
+			});
+			return;
+		}
+		if (event.type === "message") {
+			setStreamingTurns(mapTurns(event.messages));
+			return;
+		}
+		if (event.type === "connection") {
+			await utils.factory.cli.status.invalidate();
+			return;
+		}
+		if (event.type === "error") {
+			setStreamingTurns((previous) => [
+				...previous,
+				{
+					id: `error-${Date.now()}`,
+					kind: "system",
+					speaker: "Cockpit",
+					content: event.message,
+					timestamp: new Date().toISOString(),
+				},
+			]);
+			setThinkingLabel(undefined);
+			setPendingTurn(null);
+			await utils.factory.cli.status.invalidate();
+			return;
+		}
+		if (event.type === "complete") {
+			setStreamingTurns(mapTurns(event.messages));
+			const completedTurn = pendingTurn;
+			setThinkingLabel(undefined);
+			setPendingTurn(null);
+			await refreshMissionQueries();
+			if (completedTurn) {
+				await maybeCommitAfterConcreteApproval(
+					event.dialogue.id,
+					completedTurn.message,
+					completedTurn.previousState,
+				);
+			}
+			setStreamingTurns([]);
+		}
+	}
+
+	function handleStreamError(error: unknown) {
+		const message = error instanceof Error ? error.message : String(error);
+		setStreamingTurns((previous) => [
+			...previous,
+			{
+				id: `error-${Date.now()}`,
+				kind: "system",
+				speaker: "Cockpit",
+				content: message,
+				timestamp: new Date().toISOString(),
+			},
+		]);
+		setThinkingLabel(undefined);
+		setPendingTurn(null);
+		void utils.factory.cli.status.invalidate();
 	}
 
 	const readPane = documentQuery.isLoading ? (
@@ -289,53 +464,65 @@ function MissionPage() {
 	);
 
 	return (
-		<LDPSurface
-			title="Mission"
-			description="Project mission, identity, v0 demo line, decision filter, and operating principles with the full Living Document Pattern loop."
-			status={{
-				kind: "document",
-				label: "Mission",
-				state: dialogueStateForStatus(dialogueQuery.data?.dialogue.state),
-				sourcePath: documentQuery.data?.source_relative_path || missionPath,
-				lastUpdated: formatDate(documentQuery.data?.modified_at),
-				primaryAgent: MISSION_AGENT.roleId,
-				metrics: [
-					{ label: "Sections", value: countSections(content) },
-					{
-						label: "TKTK placeholders",
-						value: countTktk(content),
-						tone: countTktk(content) > 0 ? "warning" : "success",
-					},
-					{
-						label: "Dialogue turns",
-						value: turns.length,
-					},
-					{
-						label: "Active project",
-						value: activeProjectId,
-					},
-				],
-				flags: [
-					{ label: "DOMAIN_KNOWLEDGE_STEWARD primary", tone: "success" },
-					{ label: "STRATEGY_STEWARD impact", tone: "default" },
-					pendingDocumentAfter
-						? { label: "Pending write preview", tone: "warning" }
-						: { label: "No pending write", tone: "default" },
-				],
-			}}
-			primaryAgent={MISSION_AGENT}
-			turns={turns}
-			readPane={readPane}
-			inputValue={inputValue}
-			inputPlaceholder="Ask about the mission, propose a change, or approve a clear proposal..."
-			isThinking={
-				startTurnMutation.isPending ||
-				continueTurnMutation.isPending ||
-				commitMutation.isPending
-			}
-			cascadeDrafts={cascadeDrafts}
-			onInputChange={setInputValue}
-			onSubmit={handleSubmit}
-		/>
+		<>
+			<LDPSurface
+				title="Mission"
+				description="Project mission, identity, v0 demo line, decision filter, and operating principles with the full Living Document Pattern loop."
+				status={{
+					kind: "document",
+					label: "Mission",
+					state: dialogueStateForStatus(dialogueQuery.data?.dialogue.state),
+					sourcePath: documentQuery.data?.source_relative_path || missionPath,
+					lastUpdated: formatDate(documentQuery.data?.modified_at),
+					primaryAgent: MISSION_AGENT.roleId,
+					metrics: [
+						{ label: "Sections", value: countSections(content) },
+						{
+							label: "TKTK placeholders",
+							value: countTktk(content),
+							tone: countTktk(content) > 0 ? "warning" : "success",
+						},
+						{
+							label: "Dialogue turns",
+							value: displayedTurns.length,
+						},
+						{
+							label: "Active project",
+							value: activeProjectId,
+						},
+					],
+					flags: [
+						{ label: "DOMAIN_KNOWLEDGE_STEWARD primary", tone: "success" },
+						{ label: "STRATEGY_STEWARD impact", tone: "default" },
+						pendingDocumentAfter
+							? { label: "Pending write preview", tone: "warning" }
+							: { label: "No pending write", tone: "default" },
+					],
+				}}
+				primaryAgent={MISSION_AGENT}
+				turns={displayedTurns}
+				readPane={readPane}
+				inputValue={inputValue}
+				inputPlaceholder="Ask about the mission, propose a change, or approve a clear proposal..."
+				isThinking={Boolean(pendingTurn) || commitMutation.isPending}
+				thinkingLabel={
+					commitMutation.isPending
+						? "DIALOGUE_STEWARD is recording the commit..."
+						: thinkingLabel
+				}
+				cascadeDrafts={cascadeDrafts}
+				onInputChange={setInputValue}
+				onSubmit={handleSubmit}
+			/>
+			{pendingTurn && (
+				<MissionTurnSubscription
+					turn={pendingTurn}
+					project={activeProjectId}
+					documentPath={missionPath}
+					onEvent={handleStreamEvent}
+					onError={handleStreamError}
+				/>
+			)}
+		</>
 	);
 }

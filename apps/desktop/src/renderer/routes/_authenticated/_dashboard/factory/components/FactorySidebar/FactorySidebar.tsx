@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
+import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 
 interface FactoryNavItem {
@@ -162,6 +163,7 @@ export function FactorySidebar() {
 			<div className="border-t px-4 py-3 text-xs text-muted-foreground">
 				<div>v0 · local-only</div>
 				<div className="mt-0.5 truncate">FACTORY_LOCAL_ONLY=true</div>
+				<FactoryCliStatusBadges />
 			</div>
 		</div>
 	);

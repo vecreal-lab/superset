@@ -68,6 +68,14 @@ export interface DialogueTurnResult {
 	agent_message: DialogueMessage;
 }
 
+export interface DialogueBeginTurnResult {
+	dialogue: DialogueRecord;
+	messages: DialogueMessage[];
+	operator_message: DialogueMessage;
+	state: DialogueState;
+	previousState?: DialogueState;
+}
+
 export interface DialogueReadResult {
 	dialogue: DialogueRecord;
 	messages: DialogueMessage[];
@@ -313,6 +321,18 @@ export class FactoryDialogueStore {
 		this.dialoguesRoot = path.join(root, "runs", "dialogues");
 	}
 
+	getFactoryRoot(): string {
+		return this.root;
+	}
+
+	getPrimaryAgent(surface: string): string {
+		return surfacePrimaryAgent(surface);
+	}
+
+	getImpactSpecialist(surface: string): string | null {
+		return surfaceImpactSpecialist(surface);
+	}
+
 	private resolveInsideDialogues(relativeOrAbsolutePath: string): string {
 		const resolved = path.resolve(this.root, relativeOrAbsolutePath);
 		if (!isInsidePath(this.dialoguesRoot, resolved)) {
@@ -519,6 +539,137 @@ export class FactoryDialogueStore {
 		const dialogue = await this.readDialogue(directory);
 		if (!dialogue) throw new Error("Failed to read newly-created dialogue");
 		return { dialogue, messages: [operatorMessage, agentMessage], agent_message: agentMessage };
+	}
+
+	async beginTurn(input: {
+		project?: string;
+		surface: string;
+		dialogueId?: string;
+		message: string;
+		title?: string;
+	}): Promise<DialogueBeginTurnResult> {
+		const project = projectSegment(input.project);
+		const timestamp = nowIso();
+		if (!input.dialogueId) {
+			const dialogueId = randomUUID();
+			const directory = await this.ensureDialogueDir(project, input.surface, dialogueId);
+			const state = inferNextState(input.message);
+			const metadata: DialogueMetadata = {
+				id: dialogueId,
+				project,
+				surface: input.surface,
+				title: input.title || `Dialogue on ${input.surface}`,
+				created_at: timestamp,
+				updated_at: timestamp,
+				archived: false,
+			};
+			await this.writeMetadata(directory, metadata);
+			await this.writeState(directory, {
+				state,
+				updated_at: timestamp,
+				last_activity_at: timestamp,
+			});
+			const operatorMessage: DialogueMessage = {
+				id: randomUUID(),
+				dialogue_id: dialogueId,
+				kind: "operator",
+				speaker: "Yuriy",
+				content: input.message,
+				created_at: timestamp,
+			};
+			await this.appendMessage(directory, operatorMessage);
+			await this.appendAudit(directory, "dialogue_started", {
+				project,
+				state,
+				surface: input.surface,
+				live_cli_invocation: true,
+			});
+			const dialogue = await this.readDialogue(directory);
+			if (!dialogue) throw new Error("Failed to read newly-created dialogue");
+			return {
+				dialogue,
+				messages: [operatorMessage],
+				operator_message: operatorMessage,
+				state,
+			};
+		}
+
+		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
+		const existing = await this.readDialogue(directory);
+		if (!existing) {
+			throw new Error(
+				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
+			);
+		}
+		const state = inferNextState(input.message, existing.state);
+		const operatorMessage: DialogueMessage = {
+			id: randomUUID(),
+			dialogue_id: input.dialogueId,
+			kind: "operator",
+			speaker: "Yuriy",
+			content: input.message,
+			created_at: timestamp,
+		};
+		await this.appendMessage(directory, operatorMessage);
+		await this.updateDialogueState(project, input.surface, input.dialogueId, state);
+		await this.appendAudit(directory, "dialogue_turn_started", {
+			project,
+			state,
+			surface: input.surface,
+			live_cli_invocation: true,
+		});
+		const dialogue = await this.readDialogue(directory);
+		if (!dialogue) throw new Error("Failed to read updated dialogue");
+		const messages = await this.readMessages(directory);
+		return {
+			dialogue,
+			messages,
+			operator_message: operatorMessage,
+			state,
+			previousState: existing.state,
+		};
+	}
+
+	async appendRoleMessage(input: {
+		project?: string;
+		surface: string;
+		dialogueId: string;
+		kind: Extract<DialogueMessageKind, "agent" | "specialist" | "system">;
+		speaker: string;
+		roleId?: string;
+		content: string;
+		provider?: string;
+		sessionId?: string;
+	}): Promise<DialogueReadResult & { message: DialogueMessage }> {
+		const project = projectSegment(input.project);
+		const directory = this.dialogueDir(project, input.surface, input.dialogueId);
+		const existing = await this.readDialogue(directory);
+		if (!existing) {
+			throw new Error(
+				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
+			);
+		}
+		const message: DialogueMessage = {
+			id: randomUUID(),
+			dialogue_id: input.dialogueId,
+			kind: input.kind,
+			speaker: input.speaker,
+			role_id: input.roleId,
+			content: input.content,
+			created_at: nowIso(),
+		};
+		await this.appendMessage(directory, message);
+		await this.appendAudit(directory, "role_message_recorded", {
+			project,
+			surface: input.surface,
+			role_id: input.roleId || "",
+			provider: input.provider || "",
+			session_id: input.sessionId || "",
+		});
+		const dialogue = await this.readDialogue(directory);
+		if (!dialogue) throw new Error("Failed to read updated dialogue");
+		const messages = await this.readMessages(directory);
+		return { dialogue, messages, message };
 	}
 
 	async continueTurn(input: {

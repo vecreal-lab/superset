@@ -13,6 +13,7 @@ interface LDPChatPaneProps {
 	value: string;
 	placeholder?: string;
 	isThinking?: boolean;
+	thinkingLabel?: string;
 	onChange: (value: string) => void;
 	onSubmit: () => void;
 }
@@ -23,6 +24,7 @@ export function LDPChatPane({
 	value,
 	placeholder = "Ask, explore, or propose a change...",
 	isThinking,
+	thinkingLabel,
 	onChange,
 	onSubmit,
 }: LDPChatPaneProps) {
@@ -44,7 +46,10 @@ export function LDPChatPane({
 					))}
 					{isThinking && (
 						<div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-							{agent.name} is reading context...
+							<span className="inline-flex items-center gap-2">
+								<span className="size-2 animate-pulse rounded-full bg-current" />
+								{thinkingLabel || `${agent.name} is reading context...`}
+							</span>
 						</div>
 					)}
 				</div>

@@ -5,12 +5,14 @@ import {
 } from "main/lib/factory-read-model";
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
+import { createFactoryCliRouter } from "./cli";
 import { createDialogueRouter } from "./dialogue";
 
 const datasetSchema = z.enum(FACTORY_DATASETS);
 
 export const createFactoryRouter = () =>
 	router({
+		cli: createFactoryCliRouter(),
 		dialogue: createDialogueRouter(),
 		summary: publicProcedure.query(async () => {
 			return getFactoryReadModel().summary();
