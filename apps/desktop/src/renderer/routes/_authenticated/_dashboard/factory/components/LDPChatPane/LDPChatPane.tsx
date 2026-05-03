@@ -1,6 +1,8 @@
+import { Badge } from "@superset/ui/badge";
 import { Button } from "@superset/ui/button";
 import { ScrollArea } from "@superset/ui/scroll-area";
 import { Textarea } from "@superset/ui/textarea";
+import { cn } from "@superset/ui/utils";
 import { ArrowDown, Send } from "lucide-react";
 import {
 	type FormEvent,
@@ -11,7 +13,6 @@ import {
 	useRef,
 	useState,
 } from "react";
-import { LDPAttributedTurn } from "../LDPAttributedTurn";
 import { LDPDialogueHeader } from "../LDPDialogueHeader";
 import type { LDPDialogueAgent, LDPDialogueTurn } from "../LDPSurface";
 
@@ -24,6 +25,46 @@ interface LDPChatPaneProps {
 	thinkingLabel?: string;
 	onChange: (value: string) => void;
 	onSubmit: () => void;
+}
+
+const turnClasses: Record<LDPDialogueTurn["kind"], string> = {
+	operator: "bg-primary text-primary-foreground",
+	agent: "bg-muted/60",
+	specialist: "border border-amber-500/40 bg-amber-500/10",
+	system: "border border-dashed bg-background text-muted-foreground",
+};
+
+function AuthorChip({ turn }: { turn: LDPDialogueTurn }) {
+	const label = turn.kind === "operator" ? turn.speaker : turn.roleId || turn.speaker;
+	const initials = label
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.slice(0, 2)
+		.map((part) => part[0]?.toUpperCase())
+		.join("");
+
+	return (
+		<span className="inline-flex items-center gap-1.5 rounded-full border bg-background/70 px-2 py-0.5 text-[11px] text-foreground">
+			<span className="flex size-4 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
+				{initials || "?"}
+			</span>
+			<span className="font-medium">{label}</span>
+			{turn.kind !== "operator" && <span className="text-muted-foreground">agent</span>}
+		</span>
+	);
+}
+
+function LDPChatTurn({ turn }: { turn: LDPDialogueTurn }) {
+	return (
+		<div className={cn("select-text rounded-md p-3 text-sm", turnClasses[turn.kind])}>
+			<div className="mb-2 flex flex-wrap items-center gap-2 text-xs">
+				<AuthorChip turn={turn} />
+				{turn.roleId && <Badge variant="outline">{turn.roleId}</Badge>}
+				{turn.timestamp && <span className="opacity-70">{turn.timestamp}</span>}
+			</div>
+			<p className="select-text whitespace-pre-wrap leading-relaxed">{turn.content}</p>
+		</div>
+	);
 }
 
 export function LDPChatPane({
@@ -114,7 +155,7 @@ export function LDPChatPane({
 				<ScrollArea className="h-full px-4 py-3">
 					<div className="space-y-3">
 						{turns.map((turn) => (
-							<LDPAttributedTurn key={turn.id} turn={turn} />
+							<LDPChatTurn key={turn.id} turn={turn} />
 						))}
 						{isThinking && (
 							<div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">

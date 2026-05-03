@@ -41,6 +41,8 @@ export interface LDPStatusSummary {
 	sourcePath?: string;
 	lastUpdated?: string;
 	primaryAgent: string;
+	projectOwner?: string;
+	projectId?: string;
 	metrics: LDPStatusMetric[];
 	flags?: LDPStatusFlag[];
 }
