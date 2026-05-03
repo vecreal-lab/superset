@@ -29,6 +29,17 @@ const OUTPUT_KEYS: IntakeOutputKey[] = [
   "08-propagation-targets",
 ];
 
+const PROTOCOL_OUTPUT_HEADINGS = [
+  "01-key-insights",
+  "02-conflicts-with-current-positioning",
+  "03-confirmations",
+  "04-new-ideas",
+  "05-quotable-lines",
+  "06-domain-knowledge-to-capture",
+  "07-strategy-ledger-candidates",
+  "08-lesson-candidates",
+];
+
 const renderFoundations = (foundations: PromptFoundation[]) => {
   if (foundations.length === 0) {
     return "No project foundations were found for this intake.";
@@ -60,7 +71,7 @@ export const buildIntakeClassificationPrompt = (source: {
 
 Return ONLY compact JSON with this shape:
 {
-  "intake_type": "workshop | founder-brain-dump | customer-pain | competitor-news | research-note | other",
+  "intake_type": "workshop | article | customer-pain | competitor | design-reference | industry-report | advisor-conversation | founder-brain-dump | code-reference | other",
   "title": "short durable title",
   "slug": "kebab-case-slug",
   "project_id": "${source.projectId}",
@@ -78,7 +89,7 @@ ${source.rawInput}`;
 
 export const buildIntakeDigestPrompt = (source: PromptIntakeSource) => `You are INTAKE_STEWARD digesting a Layer 2 intake.
 
-Goal: convert the operator's raw intake material into durable, citeable intake outputs without modifying foundation documents.
+Goal: follow projects/_shared/foundations/intake-protocol.md Mode A and convert the operator's raw intake material into durable, citeable intake outputs without modifying foundation documents.
 
 Project: ${source.projectId}
 Intake title: ${source.title}
@@ -89,6 +100,7 @@ Use these locked rules:
 - Do not rewrite or invent foundation content.
 - Classify first, then digest.
 - Produce concrete propagation candidates, but do not apply them.
+- Match the Mode A output names and order from intake-protocol.md exactly.
 - Default lessons candidates to Tier 2 unless the evidence clearly says Tier 1 or Tier 3.
 - Flag foundation-class changes as owner-only follow-ups instead of editing them.
 
@@ -99,7 +111,7 @@ Raw intake material:
 ${source.rawInput}
 
 Return markdown with these exact headings:
-${OUTPUT_KEYS.map((key) => `# ${key}`).join("\n")}
+${PROTOCOL_OUTPUT_HEADINGS.map((key) => `# ${key}`).join("\n")}
 
 Each section should be concise, evidence-oriented, and cite the source intake folder where relevant.`;
 

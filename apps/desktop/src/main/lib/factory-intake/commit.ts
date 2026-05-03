@@ -141,6 +141,9 @@ const writeJson = async (filePath: string, value: unknown) => {
 };
 
 const findFactoryRoot = () => {
+	const envRoot = process.env.SOFTWARE_FACTORY_ROOT || process.env.FACTORY_ROOT;
+	if (envRoot) return path.resolve(envRoot);
+
 	let current = process.cwd();
 	for (let index = 0; index < 12; index += 1) {
 		if (
@@ -153,8 +156,6 @@ const findFactoryRoot = () => {
 		if (parent === current) break;
 		current = parent;
 	}
-	const envRoot = process.env.FACTORY_ROOT;
-	if (envRoot) return path.resolve(envRoot);
 	throw new Error("Unable to locate Software Factory root");
 };
 
@@ -196,7 +197,7 @@ function classifyTarget(targetPath: string): PropagationTargetType {
 function buildTargetContent(bundle: IntakeBundle, target: IntakePropagationTarget) {
 	const targetPath = normalizeSlashes(target.path).replace(/^\/+/, "");
 	if (target.content?.trim()) return target.content;
-	const domainContent = outputContent(bundle, "05-domain-knowledge");
+	const domainContent = outputContent(bundle, "06-strategy-signals");
 	const productContent = outputContent(bundle, "04-product-implications");
 	const summary = bundle.summary || bundle.raw_input;
 	const type = classifyTarget(targetPath);
@@ -228,7 +229,7 @@ function isAmbiguousLastOperatorTurn(bundle: IntakeBundle) {
 }
 
 function strategyCandidates(bundle: IntakeBundle): PropagationCandidatePreview[] {
-	return candidateLines(outputContent(bundle, "06-strategy-signals")).map((line, index) => ({
+	return candidateLines(outputContent(bundle, "07-lessons-candidates")).map((line, index) => ({
 		id: `strategy-${stableIdPart(`${bundle.item.id}-${line}`)}`,
 		kind: "strategy",
 		title: `Strategy candidate ${index + 1}`,
@@ -239,7 +240,7 @@ function strategyCandidates(bundle: IntakeBundle): PropagationCandidatePreview[]
 }
 
 function lessonCandidates(bundle: IntakeBundle): PropagationCandidatePreview[] {
-	return candidateLines(outputContent(bundle, "07-lessons-candidates")).map((line, index) => ({
+	return candidateLines(outputContent(bundle, "08-propagation-targets")).map((line, index) => ({
 		id: `lesson-${stableIdPart(`${bundle.item.id}-${line}`)}`,
 		kind: "lesson",
 		title: `Lesson candidate ${index + 1}`,

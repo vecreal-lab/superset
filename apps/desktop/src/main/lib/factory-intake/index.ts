@@ -38,11 +38,17 @@ export type IntakeOutputKey =
 	| "07-lessons-candidates"
 	| "08-propagation-targets";
 
+export interface IntakeOutputSection {
+	heading: string;
+	content: string;
+}
+
 export interface IntakeListItem {
 	id: string;
 	project_id: string;
 	type: string;
 	title: string;
+	author?: string;
 	slug: string;
 	status: IntakeStatus;
 	folder_path: string;
@@ -56,19 +62,29 @@ export interface IntakeListItem {
 
 export interface IntakeOutput {
 	key: IntakeOutputKey;
+	protocol_key: string;
+	file_name: string;
 	title: string;
 	path: string;
 	content: string;
+	parsed_sections: IntakeOutputSection[];
 }
 
 export interface IntakeDialogueMessage {
 	id: string;
 	intake_id: string;
 	project_id: string;
+	author?: string;
 	speaker: "operator" | "agent" | "system";
 	role_id?: string;
 	content: string;
 	created_at: string;
+}
+
+export interface IntakeAttachmentReference {
+	originalPath: string;
+	addedAt: string;
+	typeHint?: string;
 }
 
 export interface IntakePropagationTarget {
@@ -88,10 +104,12 @@ export interface IntakeBundle {
 	dialogue: IntakeDialogueMessage[];
 	receipts: string[];
 	attachments: string[];
+	attachment_references: IntakeAttachmentReference[];
 }
 
 export interface IntakeCreateDraftInput {
 	project_id: string;
+	author?: string;
 	type?: string;
 	title?: string;
 	slug?: string;
@@ -136,6 +154,7 @@ interface IntakeMetadata {
 	project_id: string;
 	type: string;
 	title: string;
+	author?: string;
 	slug: string;
 	status: IntakeStatus;
 	ingested_at: string;
@@ -149,17 +168,63 @@ interface ProjectNode {
 	name?: string;
 	project_id?: string;
 	node_type?: string;
+	status?: string;
 }
 
-const OUTPUT_SPECS: { key: IntakeOutputKey; title: string }[] = [
-	{ key: "01-key-insights", title: "Key Insights" },
-	{ key: "02-confirmed-facts", title: "Confirmed Facts" },
-	{ key: "03-open-questions", title: "Open Questions" },
-	{ key: "04-product-implications", title: "Product Implications" },
-	{ key: "05-domain-knowledge", title: "Domain Knowledge" },
-	{ key: "06-strategy-signals", title: "Strategy Signals" },
-	{ key: "07-lessons-candidates", title: "Lessons Candidates" },
-	{ key: "08-propagation-targets", title: "Propagation Targets" },
+const OUTPUT_SPECS: {
+	key: IntakeOutputKey;
+	protocolKey: string;
+	fileName: string;
+	title: string;
+}[] = [
+	{
+		key: "01-key-insights",
+		protocolKey: "01-key-insights",
+		fileName: "01-key-insights.md",
+		title: "Key Insights",
+	},
+	{
+		key: "02-confirmed-facts",
+		protocolKey: "02-conflicts-with-current-positioning",
+		fileName: "02-conflicts-with-current-positioning.md",
+		title: "Conflicts With Current Positioning",
+	},
+	{
+		key: "03-open-questions",
+		protocolKey: "03-confirmations",
+		fileName: "03-confirmations.md",
+		title: "Confirmations",
+	},
+	{
+		key: "04-product-implications",
+		protocolKey: "04-new-ideas",
+		fileName: "04-new-ideas.md",
+		title: "New Ideas",
+	},
+	{
+		key: "05-domain-knowledge",
+		protocolKey: "05-quotable-lines",
+		fileName: "05-quotable-lines.md",
+		title: "Quotable Lines",
+	},
+	{
+		key: "06-strategy-signals",
+		protocolKey: "06-domain-knowledge-to-capture",
+		fileName: "06-domain-knowledge-to-capture.md",
+		title: "Domain Knowledge To Capture",
+	},
+	{
+		key: "07-lessons-candidates",
+		protocolKey: "07-strategy-ledger-candidates",
+		fileName: "07-strategy-ledger-candidates.md",
+		title: "Strategy Ledger Candidates",
+	},
+	{
+		key: "08-propagation-targets",
+		protocolKey: "08-lesson-candidates",
+		fileName: "08-lesson-candidates.md",
+		title: "Lesson Candidates",
+	},
 ];
 
 const METADATA_FILE = "intake.json";
@@ -222,6 +287,16 @@ const projectSegments = (projectId: string) =>
 			return sanitized;
 		});
 
+const stripMarkdownCell = (value: string) => {
+	const trimmed = value.trim();
+	const linkMatch = trimmed.match(/^\[[^\]]+\]\(([^)]+)\)$/);
+	const candidate = linkMatch?.[1] || trimmed;
+	return candidate.replace(/^`+|`+$/g, "").replace(/^<|>$/g, "").trim();
+};
+
+const normalizeInventoryFolder = (value: string) =>
+	normalizeSlashes(stripMarkdownCell(value)).replace(/\/+$/, "");
+
 const isInsidePath = (base: string, candidate: string) => {
 	const relative = path.relative(base, candidate);
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -262,6 +337,11 @@ const writeJson = async (filePath: string, value: unknown) => {
 };
 
 const findFactoryRoot = () => {
+	const envRoot = process.env.SOFTWARE_FACTORY_ROOT || process.env.FACTORY_ROOT;
+	if (envRoot) {
+		return path.resolve(envRoot);
+	}
+
 	let current = process.cwd();
 	for (let index = 0; index < 10; index += 1) {
 		if (
@@ -275,11 +355,6 @@ const findFactoryRoot = () => {
 			break;
 		}
 		current = parent;
-	}
-
-	const envRoot = process.env.FACTORY_ROOT;
-	if (envRoot) {
-		return path.resolve(envRoot);
 	}
 
 	throw new Error("Unable to locate Software Factory root");
@@ -305,12 +380,13 @@ const intakeTypeFolder = (type: string) => {
 		"industry-report": "industry-reports",
 		"advisor-conversation": "advisor-conversations",
 		"founder-brain-dump": "founder-brain-dumps",
+		"founder-brain-dumps": "founder-brain-dumps",
 		"code-reference": "code-references",
 	};
 	return map[normalized] || `${normalized}s`;
 };
 
-const outputFileName = (key: IntakeOutputKey) => `${key}.md`;
+const outputFileName = (spec: { fileName: string }) => spec.fileName;
 
 const statusFromText = (value: string): IntakeStatus => {
 	const normalized = value.trim().toLowerCase();
@@ -356,46 +432,28 @@ const parseProjectHierarchy = async (root: string): Promise<ProjectNode[]> => {
 	const hierarchyPath = path.join(root, "projects", "project-hierarchy.yml");
 	const content = await readText(hierarchyPath);
 	const nodes: ProjectNode[] = [];
-	const lines = content.split(/\r?\n/);
+	let current: ProjectNode | undefined;
 
-	for (let index = 0; index < lines.length; index += 1) {
-		const line = lines[index];
-		const idMatch = line.match(/^\s*-\s+id:\s*("?)([^"#]+)\1\s*(?:#.*)?$/);
-		if (!idMatch) {
+	for (const line of content.split(/\r?\n/)) {
+		const idMatch = line.match(/^\s*-\s+id:\s*(.*)$/);
+		if (idMatch) {
+			const id = stripMarkdownCell(idMatch[1] || "").replace(/\s+#.*$/, "");
+			current = id ? { id } : undefined;
+			if (current) {
+				nodes.push(current);
+			}
 			continue;
 		}
 
-		const baseIndent = line.search(/\S/);
-		const node: ProjectNode = { id: idMatch[2].trim() };
-
-		for (let childIndex = index + 1; childIndex < lines.length; childIndex += 1) {
-			const childLine = lines[childIndex];
-			if (!childLine.trim()) {
-				continue;
-			}
-			const childIndent = childLine.search(/\S/);
-			if (childIndent <= baseIndent && childLine.trimStart().startsWith("- id:")) {
-				break;
-			}
-			const propertyMatch = childLine.match(/^\s+([a-zA-Z0-9_-]+):\s*(.*)$/);
-			if (!propertyMatch) {
-				continue;
-			}
-			const key = propertyMatch[1];
-			const rawValue = propertyMatch[2].replace(/\s+#.*$/, "").trim();
-			const value = rawValue.replace(/^["']|["']$/g, "");
-			if (key === "name") {
-				node.name = value;
-			}
-			if (key === "project_id") {
-				node.project_id = value;
-			}
-			if (key === "node_type") {
-				node.node_type = value;
-			}
+		const propertyMatch = line.match(/^\s+([a-zA-Z0-9_-]+):\s*(.*)$/);
+		if (!current || !propertyMatch) {
+			continue;
 		}
-
-		nodes.push(node);
+		const key = propertyMatch[1] as keyof ProjectNode;
+		const value = stripMarkdownCell(propertyMatch[2] || "").replace(/\s+#.*$/, "");
+		if (key === "name" || key === "project_id" || key === "node_type" || key === "status") {
+			current[key] = value;
+		}
 	}
 
 	return nodes;
@@ -405,11 +463,7 @@ const projectIdsFromHierarchy = async (root: string) => {
 	const nodes = await parseProjectHierarchy(root);
 	const selectable = nodes
 		.filter((node) => node.project_id)
-		.filter((node) =>
-			node.node_type
-				? ["factory_infrastructure", "product", "organization"].includes(node.node_type)
-				: true,
-		)
+		.filter((node) => node.status !== "archived")
 		.map((node) => node.project_id as string);
 
 	return [...new Set(selectable)];
@@ -491,17 +545,17 @@ const parseInventoryRows = async (root: string, projectId: string) => {
 			return index >= 0 ? cells[index] || "" : "";
 		};
 
-		const folder = valueFor("folder");
+		const folder = normalizeInventoryFolder(valueFor("folder"));
 		if (!folder) {
 			continue;
 		}
 
 		const title =
-			valueFor("title") ||
-			valueFor("topic") ||
-			valueFor("person-role") ||
-			valueFor("competitor") ||
-			valueFor("reference") ||
+			stripMarkdownCell(valueFor("title")) ||
+			stripMarkdownCell(valueFor("topic")) ||
+			stripMarkdownCell(valueFor("person-role")) ||
+			stripMarkdownCell(valueFor("competitor")) ||
+			stripMarkdownCell(valueFor("reference")) ||
 			path.basename(folder);
 		const status = statusFromText(valueFor("status"));
 		const ingestedAt = valueFor("ingested") || valueFor("date") || undefined;
@@ -543,18 +597,41 @@ const recursivelyFindMetadata = async (dir: string, depth = 0): Promise<string[]
 const listOutputFiles = async (folderPath: string): Promise<IntakeOutput[]> => {
 	const outputs: IntakeOutput[] = [];
 	for (const spec of OUTPUT_SPECS) {
-		const outputPath = path.join(folderPath, outputFileName(spec.key));
+		const outputPath = path.join(folderPath, outputFileName(spec));
 		const content = await readText(outputPath);
 		if (content.trim()) {
 			outputs.push({
 				key: spec.key,
+				protocol_key: spec.protocolKey,
+				file_name: spec.fileName,
 				title: spec.title,
 				path: outputPath,
 				content,
+				parsed_sections: parseMarkdownSections(content),
 			});
 		}
 	}
 	return outputs;
+};
+
+const parseMarkdownSections = (content: string): IntakeOutputSection[] => {
+	const sections: IntakeOutputSection[] = [];
+	let current: IntakeOutputSection | undefined;
+	for (const line of content.split(/\r?\n/)) {
+		const headingMatch = line.match(/^(#{1,6})\s+(.+)$/);
+		if (headingMatch) {
+			current = { heading: headingMatch[2].trim(), content: "" };
+			sections.push(current);
+			continue;
+		}
+		if (current) {
+			current.content = `${current.content}${current.content ? "\n" : ""}${line}`;
+		}
+	}
+	return sections.map((section) => ({
+		heading: section.heading,
+		content: section.content.trim(),
+	}));
 };
 
 const parseDialogueJsonl = async (
@@ -600,9 +677,11 @@ const extractJsonObject = (text: string) => {
 const parseDigestSections = (text: string): Partial<Record<IntakeOutputKey, string>> => {
 	const sections: Partial<Record<IntakeOutputKey, string>> = {};
 	for (const spec of OUTPUT_SPECS) {
-		const heading = spec.key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const headings = [spec.protocolKey, spec.key]
+			.map((value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+			.join("|");
 		const match = text.match(
-			new RegExp(`(?:^|\\n)#+\\s*${heading}\\s*\\n([\\s\\S]*?)(?=\\n#+\\s*\\d{2}-|$)`, "i"),
+			new RegExp(`(?:^|\\n)#+\\s*(?:${headings})\\s*\\n([\\s\\S]*?)(?=\\n#+\\s*\\d{2}-|$)`, "i"),
 		);
 		if (match) {
 			sections[spec.key] = match[1].trim();
@@ -658,9 +737,17 @@ const isForbiddenPropagationPath = (relativePath: string) => {
 };
 
 const sourceTextForPrompt = async (folderPath: string) => {
-	const rawInput = await readText(path.join(folderPath, RAW_INPUT_FILE));
-	if (rawInput.trim()) {
-		return rawInput;
+	const rawCandidates = [
+		RAW_INPUT_FILE,
+		"raw-transcript.md",
+		"00-raw-dump.md",
+		"00-raw-input.md",
+	];
+	for (const fileName of rawCandidates) {
+		const rawInput = await readText(path.join(folderPath, fileName));
+		if (rawInput.trim()) {
+			return rawInput;
+		}
 	}
 
 	const summary = await readText(path.join(folderPath, SUMMARY_FILE));
@@ -758,7 +845,7 @@ export class FactoryIntakeStore {
 		}
 
 		const filtered = items.filter((item) => {
-			if (!input.include_propagated && item.status === "propagated") {
+			if (input.include_propagated === false && item.status === "propagated") {
 				return false;
 			}
 			if (input.status && input.status !== "all" && item.status !== input.status) {
@@ -797,10 +884,19 @@ export class FactoryIntakeStore {
 		const receipts = entries
 			.filter((entry) => entry.isFile() && entry.name.toLowerCase().includes("receipt"))
 			.map((entry) => path.join(folderPath, entry.name));
-		const attachmentIndex = await readJson<{ paths: string[] }>(
+		const attachmentIndex = await readJson<{
+			paths?: string[];
+			items?: IntakeAttachmentReference[];
+		}>(
 			path.join(folderPath, "attachments", "index.json"),
 		);
-		const attachments = attachmentIndex?.paths || [];
+		const attachmentReferences =
+			attachmentIndex?.items ||
+			(attachmentIndex?.paths || []).map((originalPath) => ({
+				originalPath,
+				addedAt: item.ingested_at || nowIso(),
+			}));
+		const attachments = attachmentReferences.map((reference) => reference.originalPath);
 
 		return {
 			item,
@@ -812,11 +908,13 @@ export class FactoryIntakeStore {
 			dialogue,
 			receipts,
 			attachments,
+			attachment_references: attachmentReferences,
 		};
 	}
 
 	async createDraft(input: IntakeCreateDraftInput): Promise<IntakeBundle> {
 		const projectId = input.project_id || "software-factory";
+		const author = input.author?.trim() || "yuriy";
 		const type = input.type || "founder-brain-dump";
 		const title = input.title?.trim() || "Untitled intake";
 		const slug = safeSegment(input.slug || title);
@@ -827,13 +925,18 @@ export class FactoryIntakeStore {
 
 		const sourceUrls = input.source_urls || [];
 		const attachmentPaths = input.attachment_paths || [];
-		const attachmentReferences = attachmentPaths.map((attachmentPath) =>
-			normalizeSlashes(path.resolve(attachmentPath)),
+		const attachmentReferences: IntakeAttachmentReference[] = attachmentPaths.map(
+			(attachmentPath) => ({
+				originalPath: normalizeSlashes(path.resolve(attachmentPath)),
+				addedAt: nowIso(),
+				typeHint: path.extname(attachmentPath).replace(/^\./, "") || undefined,
+			}),
 		);
 
 		const rawInput = `# ${title}
 
 Created: ${nowIso()}
+Author: ${author}
 Project: \`${projectId}\`
 Type: \`${type}\`
 
@@ -847,12 +950,13 @@ ${sourceUrls.map((url) => `- ${url}`).join("\n") || "- none"}
 
 ## Attachments
 
-${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"}
+${attachmentReferences.map((reference) => `- ${reference.originalPath}`).join("\n") || "- none"}
 `;
 
 		await writeFile(path.join(folderPath, RAW_INPUT_FILE), rawInput, "utf8");
 		await writeJson(path.join(folderPath, "attachments", "index.json"), {
-			paths: attachmentReferences,
+			paths: attachmentReferences.map((reference) => reference.originalPath),
+			items: attachmentReferences,
 			storage_mode: "filesystem-reference",
 			note: "Layer 2 intake stores local file path references only; no upload or copy is performed.",
 		});
@@ -862,12 +966,13 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			project_id: projectId,
 			type,
 			title,
+			author,
 			slug,
 			status: "pending",
 			ingested_at: timestamp,
 			updated_at: timestamp,
 			source_urls: sourceUrls,
-			attachment_paths: attachmentReferences,
+			attachment_paths: attachmentReferences.map((reference) => reference.originalPath),
 		});
 
 		await this.ensureInventoryRow(projectId, type, title, "pending", folder);
@@ -908,6 +1013,17 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			raw_response: result.text,
 		};
 
+		await this.appendDialogue(bundle.item, {
+			speaker: "agent",
+			role_id: "INTAKE_STEWARD",
+			author: "INTAKE_STEWARD",
+			content: `Classification proposal:\n\n\`\`\`json\n${JSON.stringify(
+				classification,
+				null,
+				2,
+			)}\n\`\`\``,
+		});
+
 		return classification;
 	}
 
@@ -940,6 +1056,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			project_id: nextProjectId,
 			type: input.type,
 			title: input.title,
+			author: metadata?.author || bundle.item.author || "yuriy",
 			slug: safeSegment(input.slug || input.title),
 			status: "digesting",
 			ingested_at: metadata?.ingested_at || timestamp,
@@ -995,6 +1112,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 		const bundle = await this.get(input.intake_id);
 		await this.appendDialogue(bundle.item, {
 			speaker: "operator",
+			author: bundle.item.author || "yuriy",
 			content: input.message,
 		});
 		onEvent?.({ type: "status", message: "INTAKE_STEWARD is thinking" });
@@ -1020,6 +1138,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 		const message = await this.appendDialogue(bundle.item, {
 			speaker: "agent",
 			role_id: "INTAKE_STEWARD",
+			author: "INTAKE_STEWARD",
 			content: result.text || chunks.join(""),
 		});
 		onEvent?.({ type: "complete", message: "Dialogue turn complete" });
@@ -1034,6 +1153,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 		await writeFile(planPath, next, "utf8");
 		await this.appendDialogue(bundle.item, {
 			speaker: "operator",
+			author: bundle.item.author || "yuriy",
 			content: `Propagation plan revision:\n\n${input.revision}`,
 		});
 		return this.get(input.intake_id);
@@ -1156,12 +1276,15 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			: undefined;
 		const summary = await readText(path.join(input.folderPath, SUMMARY_FILE));
 		const plan = await readText(path.join(input.folderPath, PROPAGATION_PLAN_FILE));
+		const dialogue = await parseDialogueJsonl(path.join(input.folderPath, DIALOGUE_FILE));
+		const lastDialogueAt = dialogue.at(-1)?.created_at;
 
 		return {
 			id: makeIntakeId(input.projectId, relativeToIntakeRoot),
 			project_id: input.projectId,
 			type: metadata?.type || input.type,
 			title: metadata?.title || input.title,
+			author: metadata?.author || "yuriy",
 			slug: metadata?.slug || safeSegment(input.title),
 			status: metadata?.status || input.status,
 			folder_path: input.folderPath,
@@ -1171,7 +1294,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			inventory_path: input.inventoryPath,
 			summary_preview: summary.trim().slice(0, 280) || undefined,
 			ingested_at: metadata?.ingested_at || input.ingestedAt,
-			last_activity_at: metadata?.updated_at || stats?.mtime.toISOString(),
+			last_activity_at: lastDialogueAt || metadata?.updated_at || stats?.mtime.toISOString(),
 			propagation_target_count: parsePropagationTargets(plan).length,
 		};
 	}
@@ -1214,6 +1337,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			project_id: item.project_id,
 			type: item.type,
 			title: item.title,
+			author: metadata?.author || item.author || "yuriy",
 			slug: item.slug,
 			status,
 			ingested_at: metadata?.ingested_at || item.ingested_at || timestamp,
@@ -1369,7 +1493,7 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 		try {
 			for (const spec of OUTPUT_SPECS) {
 				const content = renderOutputDocument(spec, sections[spec.key] || "", item);
-				await writeFile(path.join(tempDir, outputFileName(spec.key)), content, "utf8");
+				await writeFile(path.join(tempDir, outputFileName(spec)), content, "utf8");
 			}
 			await writeFile(
 				path.join(tempDir, SUMMARY_FILE),
@@ -1400,12 +1524,16 @@ ${attachmentReferences.map((filePath) => `- ${filePath}`).join("\n") || "- none"
 			speaker: IntakeDialogueMessage["speaker"];
 			content: string;
 			role_id?: string;
+			author?: string;
 		},
 	) {
 		const message: IntakeDialogueMessage = {
 			id: randomUUID(),
 			intake_id: item.id,
 			project_id: item.project_id,
+			author:
+				input.author ||
+				(input.speaker === "agent" ? input.role_id || "INTAKE_STEWARD" : item.author || "yuriy"),
 			speaker: input.speaker,
 			role_id: input.role_id,
 			content: input.content,

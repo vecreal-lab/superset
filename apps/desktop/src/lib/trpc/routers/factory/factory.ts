@@ -19,6 +19,7 @@ export const createFactoryRouter = () =>
 		cli: createFactoryCliRouter(),
 		dialogue: createDialogueRouter(),
 		domainKnowledge: createFactoryDomainKnowledgeRouter(),
+		factoryIntake: createFactoryIntakeRouter(),
 		intake: createFactoryIntakeRouter(),
 		lessons: createFactoryLessonsRouter(),
 		strategyPulse: createFactoryStrategyPulseRouter(),
