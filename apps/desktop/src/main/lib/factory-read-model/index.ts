@@ -1013,6 +1013,7 @@ async function collectProjects(root: string): Promise<FactoryRow[]> {
 				modifiedAt: projectInfo?.modifiedAt || (await fileModifiedAt(filePath)),
 				data: {
 					project_id: projectInfo?.projectId || node.project_id || null,
+					primary_owner: projectInfo?.parsed.primary_owner || null,
 					identity_summary: projectInfo?.identitySummary || node.summary || null,
 					identity_path: projectInfo?.identityPath
 						? relativePath(root, projectInfo.identityPath)
@@ -1044,6 +1045,7 @@ async function collectProjects(root: string): Promise<FactoryRow[]> {
 				modifiedAt: projectInfo.modifiedAt,
 				data: {
 					project_id: projectInfo.projectId,
+					primary_owner: projectInfo.parsed.primary_owner || null,
 					identity_summary: projectInfo.identitySummary,
 					identity_path: projectInfo.identityPath
 						? relativePath(root, projectInfo.identityPath)

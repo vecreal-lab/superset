@@ -58,6 +58,95 @@ interface PendingApproval {
 	evidence_files: FactoryDocumentReference[];
 }
 
+function ApprovalMotionStyles() {
+	return (
+		<style>
+			{`
+				@keyframes p14-active-light {
+					0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+					32% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0.18); }
+				}
+				@keyframes p14-active-dark {
+					0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0); }
+					40% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0.24); }
+				}
+				@keyframes p14-check-draw {
+					from { stroke-dashoffset: 100; }
+					to { stroke-dashoffset: 0; }
+				}
+				.p14-active-light { animation: p14-active-light 1.8s ease-in-out infinite; }
+				.dark .p14-active-dark { animation: p14-active-dark 1.8s ease-in-out infinite; }
+				.p14-check {
+					stroke-dasharray: 100;
+					stroke-dashoffset: 100;
+					animation: p14-check-draw 0.75s ease-out forwards;
+				}
+				@media (prefers-reduced-motion: reduce) {
+					.p14-active-light,
+					.dark .p14-active-dark,
+					.p14-check {
+						animation: none;
+						stroke-dashoffset: 0;
+					}
+				}
+			`}
+		</style>
+	);
+}
+
+function ApprovalWorkflowRail({ approval }: { approval: PendingApproval }) {
+	const steps = [
+		{ label: "Packet", state: "done" },
+		{
+			label: approval.evidence_files.length ? "Evidence" : "Evidence pending",
+			state: approval.evidence_files.length ? "done" : "pending",
+		},
+		{ label: "Yuriy review", state: "active" },
+	];
+
+	return (
+		<div
+			className="mt-3 space-y-2"
+			aria-label={`Approval workflow for ${approval.work_order_id}`}
+		>
+			{steps.map((step, index) => (
+				<div key={step.label} className="flex items-center gap-2 text-xs">
+					<span
+						className={
+							step.state === "active"
+								? "p14-active-light p14-active-dark flex size-7 items-center justify-center rounded-full border-2 border-primary text-primary"
+								: step.state === "done"
+									? "flex size-7 items-center justify-center rounded-full bg-emerald-600 text-white"
+									: "flex size-7 items-center justify-center rounded-full border text-muted-foreground"
+						}
+					>
+						{step.state === "done" ? (
+							<svg
+								aria-hidden="true"
+								className="size-4"
+								viewBox="0 0 24 24"
+								fill="none"
+								stroke="currentColor"
+								strokeWidth="3"
+								strokeLinecap="round"
+								strokeLinejoin="round"
+							>
+								<path className="p14-check" pathLength="100" d="M20 6 9 17l-5-5" />
+							</svg>
+						) : (
+							<span className="font-mono text-[10px]">{index + 1}</span>
+						)}
+					</span>
+					<span>{step.label}</span>
+					{step.state === "active" && (
+						<Badge variant="secondary">Awaiting you</Badge>
+					)}
+				</div>
+			))}
+		</div>
+	);
+}
+
 function ApprovalsPage() {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const activeProjectId = useActiveProjectId();
@@ -138,6 +227,7 @@ function ApprovalsPage() {
 
 	const readPane = (
 		<div className="space-y-4">
+			<ApprovalMotionStyles />
 			{activeApprovals.length ? (
 				<Table>
 					<TableHeader>
@@ -157,6 +247,7 @@ function ApprovalsPage() {
 									<div className="mt-1 font-mono text-xs text-muted-foreground">
 										{approval.run_id}
 									</div>
+									<ApprovalWorkflowRail approval={approval} />
 								</TableCell>
 								<TableCell>
 									<Badge variant="outline">{approval.gate}</Badge>

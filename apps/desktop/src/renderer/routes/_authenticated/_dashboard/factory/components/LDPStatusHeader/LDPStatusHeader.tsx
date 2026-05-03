@@ -1,5 +1,7 @@
 import { Badge } from "@superset/ui/badge";
 import { cn } from "@superset/ui/utils";
+import { electronTrpc } from "renderer/lib/electron-trpc";
+import { useActiveProjectId } from "renderer/stores/active-project";
 import type { LDPMetricTone, LDPStatusSummary } from "../LDPSurface";
 
 function toneClass(tone: LDPMetricTone = "default"): string {
@@ -19,14 +21,63 @@ function kindLabel(kind: LDPStatusSummary["kind"]): string {
 	}[kind];
 }
 
+type ProjectRow = {
+	data: Record<string, string | number | boolean | null>;
+	title?: string;
+};
+
+function ProjectOwnerChip({ summary }: { summary: LDPStatusSummary }) {
+	const activeProjectId = useActiveProjectId();
+	const projects = electronTrpc.factory.dataset.useQuery(
+		{ dataset: "projects" },
+		{ refetchInterval: 5000 },
+	);
+	const projectId = summary.projectId || activeProjectId;
+	const projectRow = (projects.data || []).find(
+		(row: ProjectRow) => row.data.project_id === projectId,
+	) as ProjectRow | undefined;
+	const owner =
+		summary.projectOwner ||
+		(typeof projectRow?.data.primary_owner === "string"
+			? projectRow.data.primary_owner
+			: "") ||
+		"yuriy";
+
+	return (
+		<span className="inline-flex flex-wrap items-center gap-2">
+			<Badge variant="secondary" className="gap-1.5">
+				<span className="size-1.5 rounded-full bg-emerald-500" />
+				Project owner: {owner}
+			</Badge>
+			<Badge variant="outline">Workspace: {projectId}</Badge>
+		</span>
+	);
+}
+
+function DialogueAttentionBadge({ state }: { state: LDPStatusSummary["state"] }) {
+	const highAttention =
+		state === "needs_reply" ||
+		state === "awaiting_commit" ||
+		state === "awaiting_confirmation";
+	return (
+		<Badge
+			variant={highAttention ? "secondary" : "outline"}
+			className={cn(highAttention && "ring-1 ring-amber-500/40")}
+		>
+			{state.replace(/_/g, " ")}
+		</Badge>
+	);
+}
+
 export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 	return (
 		<div className="space-y-3">
 			<div className="flex flex-wrap items-center gap-2">
 				<Badge variant="secondary">{kindLabel(summary.kind)}</Badge>
 				<Badge variant="outline">{summary.label}</Badge>
-				<Badge variant="outline">{summary.state.replace(/_/g, " ")}</Badge>
+				<DialogueAttentionBadge state={summary.state} />
 				<Badge variant="outline">{summary.primaryAgent}</Badge>
+				<ProjectOwnerChip summary={summary} />
 			</div>
 			<div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
 				{summary.metrics.map((metric) => (
