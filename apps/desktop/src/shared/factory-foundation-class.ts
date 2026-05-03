@@ -1,4 +1,4 @@
-export const FOUNDATION_OWNER_IDENTITY = "Yuriy";
+export const DEFAULT_FOUNDATION_OWNER_IDENTITY = "yuriy";
 
 export interface FoundationClassPathInfo {
 	relativePath: string;
@@ -15,6 +15,39 @@ export interface FoundationLockDateUpdate {
 	previousLockText: string | null;
 	nextLockText: string;
 	changed: boolean;
+}
+
+export interface FoundationOwnerPolicy {
+	documentPath: string;
+	projectId: string;
+	isShared: boolean;
+	ownershipScope: "project" | "shared";
+	requiredOwner: string;
+	authorizedOwners: string[];
+	ownerLabel: string;
+	ownerSourcePath: string;
+}
+
+export type FoundationAuditPolicyStatus =
+	| "clean"
+	| "blocker"
+	| "route_to_foundation_commit";
+
+export interface FoundationClassAuditPolicyInput {
+	changedPaths: string[];
+	foundationClassAmendment?: boolean;
+	ownerApprovalOperator?: string | null;
+	ownerApprovalEvidence?: string | null;
+	ownerPolicyByPath?: Record<string, FoundationOwnerPolicy>;
+}
+
+export interface FoundationClassAuditPolicyResult {
+	status: FoundationAuditPolicyStatus;
+	foundationClassPaths: string[];
+	blockerMessage?: string;
+	routeSurface?: string;
+	requiredOwners: string[];
+	ownerApprovalOperator?: string;
 }
 
 export function normalizeFactoryPath(value: string): string {
@@ -55,11 +88,30 @@ export function isFoundationClassSurface(surface: string): boolean {
 	return normalizeFactoryPath(surface).split("/").at(0) === "foundations";
 }
 
-export function isFoundationOwner(operatorName?: string | null): boolean {
-	return (
-		(operatorName || "").trim().toLowerCase() ===
-		FOUNDATION_OWNER_IDENTITY.toLowerCase()
-	);
+export function normalizeOperatorIdentity(value?: string | null): string {
+	return (value || "").trim().toLowerCase();
+}
+
+export function ownerDisplayName(owner: string): string {
+	const normalized = normalizeOperatorIdentity(owner);
+	return normalized || DEFAULT_FOUNDATION_OWNER_IDENTITY;
+}
+
+export function isFoundationOwner(
+	operatorName?: string | null,
+	policyOrOwner?: FoundationOwnerPolicy | string | null,
+): boolean {
+	const operator = normalizeOperatorIdentity(operatorName);
+	if (!operator) return false;
+	if (!policyOrOwner) {
+		return operator === normalizeOperatorIdentity(DEFAULT_FOUNDATION_OWNER_IDENTITY);
+	}
+	if (typeof policyOrOwner === "string") {
+		return operator === normalizeOperatorIdentity(policyOrOwner);
+	}
+	return policyOrOwner.authorizedOwners
+		.map((owner) => normalizeOperatorIdentity(owner))
+		.includes(operator);
 }
 
 export function foundationSurfaceFromPath(relativePath: string): string {
@@ -70,6 +122,86 @@ export function foundationSurfaceFromPath(relativePath: string): string {
 		.replace(/^INDEX$/i, "index")
 		.toLowerCase();
 	return `foundations/${artifact}`;
+}
+
+function uniqueStrings(values: string[]): string[] {
+	const seen = new Set<string>();
+	const unique: string[] = [];
+	for (const value of values) {
+		const normalized = normalizeOperatorIdentity(value);
+		if (!normalized || seen.has(normalized)) continue;
+		seen.add(normalized);
+		unique.push(normalized);
+	}
+	return unique;
+}
+
+export function evaluateFoundationClassAuditPolicy(
+	input: FoundationClassAuditPolicyInput,
+): FoundationClassAuditPolicyResult {
+	const foundationClassPaths = input.changedPaths
+		.map((changedPath) => normalizeFactoryPath(changedPath))
+		.filter((changedPath) => isFoundationClassPath(changedPath));
+	if (foundationClassPaths.length === 0) {
+		return {
+			status: "clean",
+			foundationClassPaths: [],
+			requiredOwners: [],
+			ownerApprovalOperator: input.ownerApprovalOperator || undefined,
+		};
+	}
+
+	const policies = foundationClassPaths
+		.map((changedPath) => input.ownerPolicyByPath?.[changedPath])
+		.filter((policy): policy is FoundationOwnerPolicy => Boolean(policy));
+	const requiredOwners = uniqueStrings(
+		policies.flatMap((policy) => policy.authorizedOwners),
+	);
+
+	if (!input.foundationClassAmendment) {
+		return {
+			status: "blocker",
+			foundationClassPaths,
+			requiredOwners,
+			ownerApprovalOperator: input.ownerApprovalOperator || undefined,
+			blockerMessage:
+				"Regular work orders cannot write foundation-class files. Route the change through the Foundations surface with foundation_class_amendment: true and owner approval.",
+		};
+	}
+
+	if (!(input.ownerApprovalEvidence || "").trim()) {
+		return {
+			status: "blocker",
+			foundationClassPaths,
+			requiredOwners,
+			ownerApprovalOperator: input.ownerApprovalOperator || undefined,
+			blockerMessage:
+				"Foundation-class amendment work orders need owner approval evidence before AUDIT can route them to the Foundations commit flow.",
+		};
+	}
+
+	if (policies.length > 0) {
+		const unauthorizedPolicy = policies.find(
+			(policy) => !isFoundationOwner(input.ownerApprovalOperator, policy),
+		);
+		if (unauthorizedPolicy) {
+			return {
+				status: "blocker",
+				foundationClassPaths,
+				requiredOwners,
+				ownerApprovalOperator: input.ownerApprovalOperator || undefined,
+				blockerMessage: `Foundation-class approval must come from ${unauthorizedPolicy.ownerLabel}.`,
+			};
+		}
+	}
+
+	return {
+		status: "route_to_foundation_commit",
+		foundationClassPaths,
+		requiredOwners,
+		routeSurface: foundationSurfaceFromPath(foundationClassPaths[0] || ""),
+		ownerApprovalOperator: input.ownerApprovalOperator || undefined,
+	};
 }
 
 function normalizeCommitDate(commitDate: string): string {

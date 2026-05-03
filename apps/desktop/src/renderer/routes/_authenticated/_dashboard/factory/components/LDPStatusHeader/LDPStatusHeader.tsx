@@ -93,6 +93,9 @@ export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 				{summary.sourcePath && (
 					<span className="font-mono">Source: {summary.sourcePath}</span>
 				)}
+				{summary.projectOwner?.sourcePath && (
+					<span className="font-mono">Owner source: {summary.projectOwner.sourcePath}</span>
+				)}
 				{summary.lastUpdated && <span>Updated {summary.lastUpdated}</span>}
 				{summary.flags?.map((flag) => (
 					<span key={flag.label} className={toneClass(flag.tone)}>

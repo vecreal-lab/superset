@@ -34,6 +34,13 @@ export interface LDPStatusFlag {
 	tone?: LDPMetricTone;
 }
 
+export interface ProjectOwnerSummary {
+	owner: string;
+	label: string;
+	sourcePath?: string;
+	isShared?: boolean;
+}
+
 export interface LDPStatusSummary {
 	kind: LDPSurfaceKind;
 	label: string;
@@ -45,6 +52,13 @@ export interface LDPStatusSummary {
 	projectId?: string;
 	metrics: LDPStatusMetric[];
 	flags?: LDPStatusFlag[];
+}
+
+export interface LDPAuthorAttribution {
+	user: string;
+	role?: string;
+	isAgent: boolean;
+	displayName: string;
 }
 
 export interface LDPDialogueAgent {
@@ -60,6 +74,7 @@ export interface LDPDialogueTurn {
 	kind: LDPTurnKind;
 	speaker: string;
 	roleId?: string;
+	author?: LDPAuthorAttribution;
 	content: string;
 	timestamp?: string;
 }
@@ -72,6 +87,15 @@ export interface LDPCascadeDraft {
 	summary?: string;
 }
 
+export interface LDPStaleStateNotice {
+	surface: string;
+	lastSeenAt: string;
+	changedAt?: string;
+	changedBy?: LDPAuthorAttribution;
+	changeSummary: string;
+	affectsCurrentDialogue: boolean;
+}
+
 export interface LDPSurfaceProps {
 	title: string;
 	description: string;
@@ -80,6 +104,7 @@ export interface LDPSurfaceProps {
 	turns: LDPDialogueTurn[];
 	readPane: ReactNode;
 	visualDiffPane?: ReactNode;
+	staleStateNotice?: LDPStaleStateNotice | null;
 	inputValue: string;
 	inputPlaceholder?: string;
 	isThinking?: boolean;

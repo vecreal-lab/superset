@@ -160,7 +160,7 @@ export function LDPChatPane({
 						{isThinking && (
 							<div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
 								<span className="inline-flex items-center gap-2">
-									<span className="size-2 animate-pulse rounded-full bg-current" />
+									<LoadingBars />
 									{thinkingLabel || `${agent.name} is reading context...`}
 								</span>
 							</div>

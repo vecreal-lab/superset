@@ -1,6 +1,7 @@
 export { LDPSurface } from "./LDPSurface";
 export { useLDPSurfaceDialogue } from "./useLDPSurfaceDialogue";
 export type {
+	LDPAuthorAttribution,
 	LDPCascadeDraft,
 	LDPDialogueAgent,
 	LDPDialogueState,
@@ -12,5 +13,7 @@ export type {
 	LDPStatusFlag,
 	LDPStatusMetric,
 	LDPStatusSummary,
+	LDPStaleStateNotice,
 	LDPTurnKind,
+	ProjectOwnerSummary,
 } from "./types";
