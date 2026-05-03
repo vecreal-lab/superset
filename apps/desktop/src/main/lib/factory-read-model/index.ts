@@ -134,6 +134,23 @@ function resolveInsideFactoryRoot(root: string, relativeOrAbsolutePath: string):
 	return resolved;
 }
 
+function resolveParentFoundationFallback(root: string, requestedPath: string): string | null {
+	const requestedRelative = relativePath(root, requestedPath);
+	const match = /^projects\/([^/]+)\/([^/]+)\/foundations\/([^/]+\.md)$/.exec(
+		requestedRelative,
+	);
+	if (!match) return null;
+	const [, topLevelProject, , fileName] = match;
+	const fallbackPath = path.join(
+		root,
+		"projects",
+		topLevelProject || "",
+		"foundations",
+		fileName || "",
+	);
+	return existsSync(fallbackPath) ? fallbackPath : null;
+}
+
 function resolveInsideRuns(root: string, relativeOrAbsolutePath: string): string {
 	const runsRoot = path.join(root, "runs");
 	const resolved = resolveInsideFactoryRoot(root, relativeOrAbsolutePath);
@@ -1150,7 +1167,10 @@ export class FactoryReadModel {
 		relativeOrAbsolutePath: string,
 		maxBytes = 750_000,
 	): Promise<FactoryDocument> {
-		const filePath = resolveInsideFactoryRoot(this.root, relativeOrAbsolutePath);
+		let filePath = resolveInsideFactoryRoot(this.root, relativeOrAbsolutePath);
+		if (!existsSync(filePath)) {
+			filePath = resolveParentFoundationFallback(this.root, filePath) || filePath;
+		}
 		const modifiedAt = await fileModifiedAt(filePath);
 		const buffer = await readFile(filePath);
 		const truncated = buffer.length > maxBytes;
