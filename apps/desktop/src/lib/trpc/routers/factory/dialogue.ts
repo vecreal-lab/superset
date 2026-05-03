@@ -549,6 +549,8 @@ export const createDialogueRouter = () =>
 					.object({
 						project: projectSchema,
 						surface: surfaceSchema.optional(),
+						operatorId: z.string().min(1).max(120).optional(),
+						workspaceId: z.string().min(1).max(120).optional(),
 					})
 					.optional(),
 			)
@@ -556,6 +558,8 @@ export const createDialogueRouter = () =>
 				return getFactoryDialogueStore().attentionCounts({
 					project: input?.project,
 					surface: input?.surface,
+					operatorId: input?.operatorId,
+					workspaceId: input?.workspaceId,
 				});
 			}),
 	});

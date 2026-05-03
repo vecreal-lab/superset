@@ -1,0 +1,1 @@
+export { DialogueAttentionBadge } from "./DialogueAttentionBadge";
