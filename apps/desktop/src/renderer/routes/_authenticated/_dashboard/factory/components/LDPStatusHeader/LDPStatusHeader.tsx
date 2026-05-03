@@ -1,6 +1,11 @@
 import { Badge } from "@superset/ui/badge";
 import { cn } from "@superset/ui/utils";
-import type { LDPMetricTone, LDPStatusSummary } from "../LDPSurface";
+import { ShieldCheck, UsersRound } from "lucide-react";
+import type {
+	LDPMetricTone,
+	LDPStatusSummary,
+	ProjectOwnerSummary,
+} from "../LDPSurface";
 
 function toneClass(tone: LDPMetricTone = "default"): string {
 	return cn(
@@ -19,6 +24,16 @@ function kindLabel(kind: LDPStatusSummary["kind"]): string {
 	}[kind];
 }
 
+function ProjectOwnerChip({ owner }: { owner: ProjectOwnerSummary }) {
+	const Icon = owner.isShared ? UsersRound : ShieldCheck;
+	return (
+		<Badge variant="outline" className="gap-1.5">
+			<Icon className="size-3" />
+			Owner: {owner.label || owner.owner}
+		</Badge>
+	);
+}
+
 export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 	return (
 		<div className="space-y-3">
@@ -27,6 +42,7 @@ export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 				<Badge variant="outline">{summary.label}</Badge>
 				<Badge variant="outline">{summary.state.replace(/_/g, " ")}</Badge>
 				<Badge variant="outline">{summary.primaryAgent}</Badge>
+				{summary.projectOwner && <ProjectOwnerChip owner={summary.projectOwner} />}
 			</div>
 			<div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
 				{summary.metrics.map((metric) => (
@@ -41,6 +57,9 @@ export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 			<div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
 				{summary.sourcePath && (
 					<span className="font-mono">Source: {summary.sourcePath}</span>
+				)}
+				{summary.projectOwner?.sourcePath && (
+					<span className="font-mono">Owner source: {summary.projectOwner.sourcePath}</span>
 				)}
 				{summary.lastUpdated && <span>Updated {summary.lastUpdated}</span>}
 				{summary.flags?.map((flag) => (

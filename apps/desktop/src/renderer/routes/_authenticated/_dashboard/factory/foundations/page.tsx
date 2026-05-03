@@ -8,14 +8,15 @@ import {
 	useActiveProjectId,
 } from "renderer/stores/active-project";
 import {
-	FOUNDATION_OWNER_IDENTITY,
 	applyFoundationLockDate,
 	foundationSurfaceFromPath,
 } from "shared/factory-foundation-class";
 import {
 	LDPSurface,
+	type LDPAuthorAttribution,
 	type LDPDialogueTurn,
 	type LDPStatusSummary,
+	type LDPStaleStateNotice,
 } from "../components/LDPSurface";
 import { LDPVisualDiff } from "../components/LDPVisualDiff";
 import { EmptyFactoryState, formatDate } from "../components/FactoryView";
@@ -140,6 +141,7 @@ function mapTurns(messages: Array<{
 	kind: LDPDialogueTurn["kind"];
 	speaker: string;
 	role_id?: string;
+	author?: LDPAuthorAttribution;
 	content: string;
 	created_at: string;
 }>): LDPDialogueTurn[] {
@@ -148,6 +150,7 @@ function mapTurns(messages: Array<{
 		kind: message.kind,
 		speaker: message.speaker,
 		roleId: message.role_id,
+		author: message.author,
 		content: message.content,
 		timestamp: message.created_at,
 	}));
@@ -196,7 +199,18 @@ function FoundationsPage() {
 	const selectedSurface = FOUNDATION_SURFACES.find(
 		(surface) => surface.id === selectedSurfaceId,
 	)!;
-	const documentPath = projectFoundationPath(activeProjectId, selectedSurface.fileName);
+	const workspaceContext = useMemo(
+		() => ({
+			workspaceId: activeProjectId,
+			projectsRoot: "projects",
+			isMultiUser: false,
+		}),
+		[activeProjectId],
+	);
+	const documentPath = projectFoundationPath(
+		workspaceContext.workspaceId,
+		selectedSurface.fileName,
+	);
 	const dialogueSurface = foundationSurfaceFromPath(documentPath);
 	const [inputValue, setInputValue] = useState("");
 	const [localDialogueId, setLocalDialogueId] = useState<string | null>(null);
@@ -206,6 +220,10 @@ function FoundationsPage() {
 	const [thinkingLabel, setThinkingLabel] = useState<string | undefined>();
 	const documentQuery = electronTrpc.factory.document.useQuery(
 		{ path: documentPath },
+		{ refetchInterval: 5000 },
+	);
+	const ownerPolicyQuery = electronTrpc.factory.dialogue.foundationOwnerPolicy.useQuery(
+		{ documentPath },
 		{ refetchInterval: 5000 },
 	);
 	const activeDialogueId = search.dialogueId || localDialogueId || undefined;
@@ -220,6 +238,7 @@ function FoundationsPage() {
 	const commitMutation = electronTrpc.factory.dialogue.commit.useMutation();
 	const rawContent = documentQuery.data?.content || "";
 	const content = rawContent.trimEnd();
+	const ownerPolicy = ownerPolicyQuery.data;
 	const turns = useMemo(
 		() => mapTurns(dialogueQuery.data?.messages || []),
 		[dialogueQuery.data?.messages],
@@ -231,6 +250,17 @@ function FoundationsPage() {
 			...streamingTurns.filter((turn) => !persistedIds.has(turn.id)),
 		];
 	}, [streamingTurns, turns]);
+	const staleStateNotice = useMemo<LDPStaleStateNotice | null>(() => {
+		if (!pendingDraft || rawContent === pendingDraft.before) return null;
+		return {
+			surface: dialogueSurface,
+			lastSeenAt: pendingDraft.createdAt,
+			changedAt: documentQuery.data?.modified_at || undefined,
+			changeSummary:
+				"The foundation file changed after this draft was prepared. Refresh the review before approving so the owner sees the latest text.",
+			affectsCurrentDialogue: true,
+		};
+	}, [dialogueSurface, documentQuery.data?.modified_at, pendingDraft, rawContent]);
 	const cascadeDrafts = useMemo(() => {
 		const dialogue = dialogueQuery.data?.dialogue;
 		if (!dialogue || dialogue.state !== "cascade_pending") return [];
@@ -293,6 +323,7 @@ function FoundationsPage() {
 			utils.factory.dialogue.get.invalidate(),
 			utils.factory.dialogue.list.invalidate(),
 			utils.factory.dialogue.attentionCounts.invalidate(),
+			utils.factory.dialogue.foundationOwnerPolicy.invalidate(),
 			utils.factory.cli.status.invalidate(),
 		]);
 	}
@@ -318,7 +349,21 @@ function FoundationsPage() {
 					kind: "system",
 					speaker: "Cockpit",
 					content:
-						"Foundation-class commit blocked: no complete document draft and visual diff are pending.",
+						"I need a complete draft and visible diff before I can write a foundation file.",
+					timestamp: new Date().toISOString(),
+				},
+			]);
+			return;
+		}
+		if (!ownerPolicy) {
+			setStreamingTurns((previous) => [
+				...previous,
+				{
+					id: `foundation-owner-policy-missing-${Date.now()}`,
+					kind: "system",
+					speaker: "Cockpit",
+					content:
+						"I need the project owner policy before I can write a foundation file. Refresh this surface and try again.",
 					timestamp: new Date().toISOString(),
 				},
 			]);
@@ -329,7 +374,7 @@ function FoundationsPage() {
 			surface: dialogueSurface,
 			dialogueId,
 			notes: message,
-			operatorName: FOUNDATION_OWNER_IDENTITY,
+			operatorName: ownerPolicy.requiredOwner,
 			operatorReason: draft.reason || message,
 			visualDiffConfirmed: true,
 			documentPath,
@@ -525,16 +570,29 @@ function FoundationsPage() {
 					sourcePath: documentQuery.data?.source_relative_path || documentPath,
 					lastUpdated: formatDate(documentQuery.data?.modified_at),
 					primaryAgent: FOUNDATION_AGENT.roleId,
+					projectOwner: ownerPolicy
+						? {
+								owner: ownerPolicy.requiredOwner,
+								label: ownerPolicy.ownerLabel,
+								sourcePath: ownerPolicy.ownerSourcePath,
+								isShared: ownerPolicy.isShared,
+							}
+						: undefined,
 					metrics: [
 						{ label: "Sections", value: countSections(content) },
 						{ label: "Lock markers", value: countLockDates(content) },
 						{ label: "Dialogue turns", value: displayedTurns.length },
-						{ label: "Active project", value: activeProjectId },
+						{ label: "Workspace", value: workspaceContext.workspaceId },
 					],
 					flags: [
-						{ label: "Owner-only", tone: "warning" },
-						{ label: "Visual diff required", tone: pendingDraft ? "success" : "default" },
-						{ label: "Cascade drafting mandatory", tone: "default" },
+						{
+							label: ownerPolicyQuery.isLoading
+								? "Reading owner policy"
+								: "Project owner approval required",
+							tone: ownerPolicy ? "warning" : "default",
+						},
+						{ label: "Visual diff ready", tone: pendingDraft ? "success" : "default" },
+						{ label: "Cascade drafts required", tone: "default" },
 					],
 				}}
 				primaryAgent={FOUNDATION_AGENT}
@@ -550,18 +608,19 @@ function FoundationsPage() {
 						<LDPVisualDiff
 							before={pendingDraft.before}
 							after={pendingDraft.after}
-							title="Foundation-class commit preview"
+							title="Foundation commit preview"
 							beforeLabel={documentPath}
 							afterLabel="Draft with lock-date update"
 						/>
 					) : null
 				}
+				staleStateNotice={staleStateNotice}
 				inputValue={inputValue}
-				inputPlaceholder="Ask about this foundation, propose a change, or approve a drafted update..."
+				inputPlaceholder="Ask about this foundation, propose a complete replacement, or approve the pending draft..."
 				isThinking={Boolean(pendingTurn) || commitMutation.isPending}
 				thinkingLabel={
 					commitMutation.isPending
-						? "DIALOGUE_STEWARD is enforcing the foundation-class commit gate..."
+						? "Checking owner approval and writing the foundation update..."
 						: thinkingLabel
 				}
 				cascadeDrafts={cascadeDrafts}

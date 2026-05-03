@@ -26,6 +26,23 @@ interface LDPChatPaneProps {
 	onSubmit: () => void;
 }
 
+function LoadingBars() {
+	return (
+		<span className="inline-flex h-4 items-end gap-0.5 text-[var(--clay-light)] dark:text-[var(--clay-bright)]">
+			{[0, 1, 2, 3].map((index) => (
+				<span
+					key={index}
+					className="inline-block w-[3px] animate-pulse rounded-full bg-current"
+					style={{
+						height: `${8 + index * 2}px`,
+						animationDelay: `${index * 120}ms`,
+					}}
+				/>
+			))}
+		</span>
+	);
+}
+
 export function LDPChatPane({
 	agent,
 	turns,
@@ -119,7 +136,7 @@ export function LDPChatPane({
 						{isThinking && (
 							<div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
 								<span className="inline-flex items-center gap-2">
-									<span className="size-2 animate-pulse rounded-full bg-current" />
+									<LoadingBars />
 									{thinkingLabel || `${agent.name} is reading context...`}
 								</span>
 							</div>

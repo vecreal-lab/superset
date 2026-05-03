@@ -10,12 +10,17 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 import {
-	FOUNDATION_OWNER_IDENTITY,
+	DEFAULT_FOUNDATION_OWNER_IDENTITY,
+	type FoundationClassAuditPolicyInput,
+	type FoundationClassAuditPolicyResult,
+	type FoundationOwnerPolicy,
 	applyFoundationLockDate,
+	evaluateFoundationClassAuditPolicy,
 	getFoundationClassPathInfo,
 	isFoundationClassPath,
 	isFoundationClassSurface,
 	isFoundationOwner,
+	normalizeOperatorIdentity,
 } from "shared/factory-foundation-class";
 import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 import { buildUnifiedTextDiff } from "shared/factory-visual-diff";
@@ -38,12 +43,20 @@ export type DialogueMessageKind = "operator" | "agent" | "specialist" | "system"
 
 export const DEFAULT_DIALOGUE_PROJECT_ID = "software-factory";
 
+export interface DialogueAuthorAttribution {
+	user: string;
+	role?: string;
+	isAgent: boolean;
+	displayName: string;
+}
+
 export interface DialogueMessage {
 	id: string;
 	dialogue_id: string;
 	kind: DialogueMessageKind;
 	speaker: string;
 	role_id?: string;
+	author?: DialogueAuthorAttribution;
 	content: string;
 	created_at: string;
 }
@@ -250,8 +263,73 @@ function parseYamlRecord(raw: string): Record<string, string | boolean> {
 	return parsed;
 }
 
+function stripYamlString(value: string): string {
+	const withoutComment = value.replace(/\s+#.*$/, "").trim();
+	if (
+		(withoutComment.startsWith('"') && withoutComment.endsWith('"')) ||
+		(withoutComment.startsWith("'") && withoutComment.endsWith("'"))
+	) {
+		return withoutComment.slice(1, -1).trim();
+	}
+	return withoutComment;
+}
+
+function parseYamlStringList(raw: string, key: string): string[] {
+	const lines = raw.split(/\r?\n/);
+	const values: string[] = [];
+	let inList = false;
+
+	for (const line of lines) {
+		const scalar = new RegExp(`^${key}:\\s*(.*)$`).exec(line);
+		if (scalar) {
+			const value = stripYamlString(scalar[1] || "");
+			if (value.startsWith("[") && value.endsWith("]")) {
+				return value
+					.slice(1, -1)
+					.split(",")
+					.map(stripYamlString)
+					.filter(Boolean);
+			}
+			if (value) return [value];
+			inList = true;
+			continue;
+		}
+
+		if (inList) {
+			const item = /^\s*-\s*(.+)$/.exec(line);
+			if (item) {
+				const value = stripYamlString(item[1] || "");
+				if (value) values.push(value);
+				continue;
+			}
+			if (/^\S/.test(line)) break;
+		}
+	}
+
+	return values;
+}
+
 function nowIso(): string {
 	return new Date().toISOString();
+}
+
+function humanAuthor(operatorName = DEFAULT_FOUNDATION_OWNER_IDENTITY): DialogueAuthorAttribution {
+	const user = normalizeOperatorIdentity(operatorName) || DEFAULT_FOUNDATION_OWNER_IDENTITY;
+	return {
+		user,
+		isAgent: false,
+		displayName: user,
+	};
+}
+
+function roleAuthor(speaker: string, roleId?: string): DialogueAuthorAttribution {
+	const role = roleId || speaker;
+	return {
+		user: normalizeOperatorIdentity(role),
+		role,
+		isAgent: true,
+		displayName: speaker,
+	};
 }
 
 function previewMessage(messages: DialogueMessage[]): string {
@@ -329,7 +407,7 @@ function dialogueStewardResponse(input: {
 		? ` ${impactSpecialist} handles impact analysis before downstream work is spawned.`
 		: "";
 	const foundationLine = isFoundationClassSurface(input.surface)
-		? ` This is a foundation-class surface: only ${FOUNDATION_OWNER_IDENTITY} can commit, holistic review includes the full foundations folder plus citing docs, and every non-trivial citation impact needs a cascade draft.`
+		? " This is a foundation-class surface: the project owner from project-pipeline.yml must approve the write, holistic review includes the full foundations folder plus citing docs, and every non-trivial citation impact needs a cascade draft."
 		: "";
 	const normalized = input.message.trim().toLowerCase();
 	const lead = `DIALOGUE_STEWARD is coordinating this ${target} turn for project ${input.project}. ${primaryAgent} remains the surface-specific primary role; I am not replacing that specialist.${impactLine}${foundationLine}`;
@@ -370,6 +448,101 @@ export class FactoryDialogueStore {
 
 	getImpactSpecialist(surface: string): string | null {
 		return surfaceImpactSpecialist(surface);
+	}
+
+	private projectPipelinePath(projectId: string): string {
+		return path.join(this.root, "projects", ...projectId.split("/"), "project-pipeline.yml");
+	}
+
+	private sharedOwnersPath(): string {
+		return path.join(this.root, "projects", "_shared", "owners.yml");
+	}
+
+	private async ensureSharedOwnersFile(): Promise<string> {
+		const ownersPath = this.sharedOwnersPath();
+		if (!existsSync(ownersPath)) {
+			await mkdir(path.dirname(ownersPath), { recursive: true });
+			await writeFile(
+				ownersPath,
+				[
+					"# Shared foundation owners",
+					"# Created by WO-C15.8 as the v0 owner policy source for projects/_shared/foundations/**.",
+					"foundation_shared_owners:",
+					`  - ${DEFAULT_FOUNDATION_OWNER_IDENTITY}`,
+					"",
+				].join("\n"),
+				"utf8",
+			);
+		}
+		return ownersPath;
+	}
+
+	async getFoundationOwnerPolicy(documentPath: string): Promise<FoundationOwnerPolicy> {
+		const normalizedPath = normalizeSlashes(documentPath);
+		const info = getFoundationClassPathInfo(normalizedPath);
+		if (!info) {
+			throw new Error(`Owner policy only applies to foundation-class paths: ${documentPath}`);
+		}
+
+		if (info.isShared) {
+			const ownersPath = await this.ensureSharedOwnersFile();
+			const ownersRaw = await readFile(ownersPath, "utf8");
+			const owners = parseYamlStringList(ownersRaw, "foundation_shared_owners");
+			const authorizedOwners = owners.length
+				? owners.map(normalizeOperatorIdentity).filter(Boolean)
+				: [DEFAULT_FOUNDATION_OWNER_IDENTITY];
+			return {
+				documentPath: info.relativePath,
+				projectId: info.projectId,
+				isShared: true,
+				ownershipScope: "shared",
+				requiredOwner: authorizedOwners[0] || DEFAULT_FOUNDATION_OWNER_IDENTITY,
+				authorizedOwners,
+				ownerLabel: "shared (admins)",
+				ownerSourcePath: this.relativeToRoot(ownersPath),
+			};
+		}
+
+		const pipelinePath = this.projectPipelinePath(info.projectId);
+		if (!existsSync(pipelinePath)) {
+			throw new Error(
+				`Project pipeline not found for foundation owner policy: ${this.relativeToRoot(pipelinePath)}`,
+			);
+		}
+		const pipelineRaw = parseYamlRecord(await readFile(pipelinePath, "utf8"));
+		const primaryOwner = String(pipelineRaw.primary_owner || "").trim();
+		if (!primaryOwner) {
+			throw new Error(
+				`Project pipeline must declare primary_owner before foundation-class commits: ${this.relativeToRoot(pipelinePath)}`,
+			);
+		}
+		const owner = normalizeOperatorIdentity(primaryOwner);
+		return {
+			documentPath: info.relativePath,
+			projectId: info.projectId,
+			isShared: false,
+			ownershipScope: "project",
+			requiredOwner: owner,
+			authorizedOwners: [owner],
+			ownerLabel: owner,
+			ownerSourcePath: this.relativeToRoot(pipelinePath),
+		};
+	}
+
+	async evaluateFoundationAuditPolicy(
+		input: Omit<FoundationClassAuditPolicyInput, "ownerPolicyByPath">,
+	): Promise<FoundationClassAuditPolicyResult> {
+		const ownerPolicyByPath: Record<string, FoundationOwnerPolicy> = {};
+		for (const changedPath of input.changedPaths) {
+			const normalizedPath = normalizeSlashes(changedPath);
+			if (!isFoundationClassPath(normalizedPath)) continue;
+			ownerPolicyByPath[normalizedPath] =
+				await this.getFoundationOwnerPolicy(normalizedPath);
+		}
+		return evaluateFoundationClassAuditPolicy({
+			...input,
+			ownerPolicyByPath,
+		});
 	}
 
 	private resolveInsideDialogues(relativeOrAbsolutePath: string): string {
@@ -550,7 +723,8 @@ export class FactoryDialogueStore {
 			id: randomUUID(),
 			dialogue_id: dialogueId,
 			kind: "operator",
-			speaker: "Yuriy",
+			speaker: DEFAULT_FOUNDATION_OWNER_IDENTITY,
+			author: humanAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -560,6 +734,7 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
+			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: dialogueStewardResponse({
 				project,
 				surface: input.surface,
@@ -612,7 +787,8 @@ export class FactoryDialogueStore {
 				id: randomUUID(),
 				dialogue_id: dialogueId,
 				kind: "operator",
-				speaker: "Yuriy",
+				speaker: DEFAULT_FOUNDATION_OWNER_IDENTITY,
+				author: humanAuthor(),
 				content: input.message,
 				created_at: timestamp,
 			};
@@ -645,7 +821,8 @@ export class FactoryDialogueStore {
 			id: randomUUID(),
 			dialogue_id: input.dialogueId,
 			kind: "operator",
-			speaker: "Yuriy",
+			speaker: DEFAULT_FOUNDATION_OWNER_IDENTITY,
+			author: humanAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -694,6 +871,7 @@ export class FactoryDialogueStore {
 			kind: input.kind,
 			speaker: input.speaker,
 			role_id: input.roleId,
+			author: roleAuthor(input.speaker, input.roleId),
 			content: input.content,
 			created_at: nowIso(),
 		};
@@ -731,7 +909,8 @@ export class FactoryDialogueStore {
 			id: randomUUID(),
 			dialogue_id: input.dialogueId,
 			kind: "operator",
-			speaker: "Yuriy",
+			speaker: DEFAULT_FOUNDATION_OWNER_IDENTITY,
+			author: humanAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -741,6 +920,7 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
+			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: dialogueStewardResponse({
 				project,
 				surface: input.surface,
@@ -958,11 +1138,13 @@ export class FactoryDialogueStore {
 		let lockDateDetails:
 			| ReturnType<typeof applyFoundationLockDate>
 			| undefined;
+		let ownerPolicy: FoundationOwnerPolicy | undefined;
 
 		if (isFoundationCommit) {
-			if (!isFoundationOwner(input.operatorName)) {
+			ownerPolicy = await this.getFoundationOwnerPolicy(documentPath);
+			if (!isFoundationOwner(input.operatorName, ownerPolicy)) {
 				throw new Error(
-					`Foundation-class commits require ${FOUNDATION_OWNER_IDENTITY} as the committing operator.`,
+					`Foundation-class commits require approval from ${ownerPolicy.ownerLabel}.`,
 				);
 			}
 			const reason = (input.operatorReason || input.notes || "").trim();
@@ -1002,6 +1184,8 @@ export class FactoryDialogueStore {
 				surface: input.surface,
 				document_path: documentPath,
 				operator: input.operatorName || "",
+				owner_identity: ownerPolicy?.ownerLabel || "",
+				owner_source_path: ownerPolicy?.ownerSourcePath || "",
 				operator_reason: reason,
 				visual_diff_confirmed: true,
 				full_diff: diff,
@@ -1076,6 +1260,7 @@ export class FactoryDialogueStore {
 			project,
 			notes: input.notes || "",
 			document_path: input.documentPath || "",
+			operator: input.operatorName || "",
 			dialogue_steward_bridge: true,
 			foundation_class: Boolean(documentCommit?.foundationClass),
 			cascade_work_order: cascadeDrafts[0]?.href || `/factory/work-orders/${cascadeId}`,
@@ -1091,6 +1276,7 @@ export class FactoryDialogueStore {
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
 			role_id: "DIALOGUE_STEWARD",
+			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: ${cascadeLinks || "none"} and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
 			created_at: nowIso(),
 		});

@@ -17,7 +17,6 @@ import { existsSync } from "node:fs";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import {
-	FOUNDATION_OWNER_IDENTITY,
 	isFoundationClassPath,
 } from "shared/factory-foundation-class";
 import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
@@ -118,12 +117,18 @@ async function readFoundationReviewScopeForPrompt(
 	documentPath?: string,
 ): Promise<string> {
 	if (!documentPath || !isFoundationClassPath(documentPath)) return "";
-	const scope = await getFactoryDialogueStore().getFoundationReviewScope(documentPath);
+	const store = getFactoryDialogueStore();
+	const [scope, ownerPolicy] = await Promise.all([
+		store.getFoundationReviewScope(documentPath),
+		store.getFoundationOwnerPolicy(documentPath),
+	]);
 	const chunks: string[] = [
-		`Foundation-class mode is active for ${documentPath}. Only ${FOUNDATION_OWNER_IDENTITY} can commit this surface.`,
+		`Foundation-class mode is active for ${documentPath}. Commit approval must come from ${ownerPolicy.ownerLabel}.`,
+		`Owner policy source: ${ownerPolicy.ownerSourcePath}.`,
 		`Holistic review folder: ${scope.foundationsFolder || "(none)"}`,
 		`Foundation files: ${scope.foundationFiles.length ? scope.foundationFiles.join(", ") : "(none)"}`,
 		`Citing docs: ${scope.citingDocs.length ? scope.citingDocs.join(", ") : "(none)"}`,
+		"Governance citations: projects/software-factory/drafts/c26-architecture.md sections 3, 4, and 7.5; projects/_shared/foundations/multi-user-ownership-and-handoff-policy.md Project ownership; work-orders/WO-C21.2-FACTORY-INTAKE-READ-MODEL-AND-TRPC.yml AUDIT scope tightening; projects/software-factory/foundations/living-document-pattern.md Foundation-class surfaces.",
 	];
 	for (const relativePath of scope.foundationFiles) {
 		const content = await readOptionalFile(root, relativePath);
@@ -473,6 +478,32 @@ export const createDialogueRouter = () =>
 			)
 			.mutation(async ({ input }) => {
 				return getFactoryDialogueStore().commit(input);
+			}),
+		foundationOwnerPolicy: publicProcedure
+			.input(
+				z.object({
+					documentPath: z.string().min(1).max(1_000),
+				}),
+			)
+			.query(async ({ input }) => {
+				return getFactoryDialogueStore().getFoundationOwnerPolicy(input.documentPath);
+			}),
+		foundationAuditPolicy: publicProcedure
+			.input(
+				z.object({
+					changedPaths: z.array(z.string().min(1).max(1_000)),
+					foundationClassAmendment: z.boolean().optional(),
+					ownerApprovalOperator: z.string().max(120).optional(),
+					ownerApprovalEvidence: z.string().max(20_000).optional(),
+				}),
+			)
+			.query(async ({ input }) => {
+				return getFactoryDialogueStore().evaluateFoundationAuditPolicy({
+					changedPaths: input.changedPaths,
+					foundationClassAmendment: input.foundationClassAmendment,
+					ownerApprovalOperator: input.ownerApprovalOperator,
+					ownerApprovalEvidence: input.ownerApprovalEvidence,
+				});
 			}),
 		get: publicProcedure
 			.input(dialogueIdentitySchema)
