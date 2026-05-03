@@ -19,6 +19,10 @@ import {
 } from "shared/factory-foundation-class";
 import { isChangeProposalIntent } from "shared/factory-dialogue-intent";
 import { buildUnifiedTextDiff } from "shared/factory-visual-diff";
+import type {
+	AuthorAttribution,
+	StaleStateNotice,
+} from "lib/types/factory-operator-console";
 
 export const DIALOGUE_STATES = [
 	"needs_reply",
@@ -43,6 +47,7 @@ export interface DialogueMessage {
 	dialogue_id: string;
 	kind: DialogueMessageKind;
 	speaker: string;
+	author?: string;
 	role_id?: string;
 	content: string;
 	created_at: string;
@@ -53,6 +58,7 @@ interface DialogueMetadata {
 	project: string;
 	surface: string;
 	title: string;
+	author?: string;
 	created_at: string;
 	updated_at: string;
 	archived: boolean;
@@ -70,6 +76,10 @@ export interface DialogueRecord extends DialogueMetadata, DialogueStateFile {
 	messages_path: string;
 	message_count: number;
 	last_message_preview: string;
+	primary_agent: string;
+	participants: AuthorAttribution[];
+	is_mine: boolean;
+	stale_state_notice?: StaleStateNotice;
 }
 
 export interface DialogueTurnResult {
@@ -258,6 +268,57 @@ function previewMessage(messages: DialogueMessage[]): string {
 	const last = messages.at(-1);
 	if (!last) return "";
 	return last.content.length > 140 ? `${last.content.slice(0, 137)}...` : last.content;
+}
+
+function authorFromMessage(message: DialogueMessage): AuthorAttribution {
+	const isAgent = message.kind === "agent" || message.kind === "specialist";
+	const role = message.role_id || (isAgent ? message.speaker : undefined);
+	return {
+		user: message.author || (isAgent ? "agent" : "yuriy"),
+		role,
+		isAgent,
+		displayName: isAgent ? role || message.speaker : message.speaker || "Yuriy",
+	};
+}
+
+function uniqueParticipants(messages: DialogueMessage[]): AuthorAttribution[] {
+	const participants = new Map<string, AuthorAttribution>();
+	for (const message of messages) {
+		const attribution = authorFromMessage(message);
+		const key = `${attribution.isAgent ? "agent" : "operator"}:${attribution.user}:${attribution.role || ""}`;
+		participants.set(key, attribution);
+	}
+	if (participants.size === 0) {
+		participants.set("operator:yuriy:", {
+			user: "yuriy",
+			isAgent: false,
+			displayName: "Yuriy",
+		});
+	}
+	return [...participants.values()];
+}
+
+function staleStateNoticeFromState(
+	stateRaw: Record<string, string | boolean>,
+): StaleStateNotice | undefined {
+	const summary = stateRaw.stale_summary;
+	const sourcePath = stateRaw.stale_source_path;
+	if (typeof summary !== "string" || typeof sourcePath !== "string") {
+		return undefined;
+	}
+	return {
+		sourcePath,
+		summary,
+		previousUpdatedAt:
+			typeof stateRaw.stale_previous_updated_at === "string"
+				? stateRaw.stale_previous_updated_at
+				: undefined,
+		currentUpdatedAt:
+			typeof stateRaw.stale_current_updated_at === "string"
+				? stateRaw.stale_current_updated_at
+				: undefined,
+		acknowledged: Boolean(stateRaw.stale_acknowledged),
+	};
 }
 
 function surfaceLabel(surface: string): string {
@@ -461,11 +522,15 @@ export class FactoryDialogueStore {
 		const project = String(
 			metadataRaw.project || relativeParts[0] || DEFAULT_DIALOGUE_PROJECT_ID,
 		);
+		const participants = uniqueParticipants(messages);
+		const operatorParticipant =
+			participants.find((participant) => !participant.isAgent) || participants[0];
 		return {
 			id: String(metadataRaw.id || path.basename(directory)),
 			project,
 			surface: String(metadataRaw.surface || "unknown"),
 			title: String(metadataRaw.title || "Untitled dialogue"),
+			author: String(metadataRaw.author || operatorParticipant?.user || "yuriy"),
 			created_at: String(metadataRaw.created_at || modifiedAt),
 			updated_at: String(metadataRaw.updated_at || modifiedAt),
 			archived: Boolean(metadataRaw.archived),
@@ -476,6 +541,10 @@ export class FactoryDialogueStore {
 			messages_path: normalizeSlashes(path.relative(this.root, path.join(directory, "messages.jsonl"))),
 			message_count: messages.length,
 			last_message_preview: previewMessage(messages),
+			primary_agent: surfacePrimaryAgent(String(metadataRaw.surface || "unknown")),
+			participants,
+			is_mine: true,
+			stale_state_notice: staleStateNoticeFromState(stateRaw),
 		};
 	}
 
@@ -499,6 +568,7 @@ export class FactoryDialogueStore {
 			project: existing.project,
 			surface: existing.surface,
 			title: existing.title,
+			author: existing.author,
 			created_at: existing.created_at,
 			updated_at: timestamp,
 			archived: options.archived ?? existing.archived,
@@ -536,6 +606,7 @@ export class FactoryDialogueStore {
 			project,
 			surface: input.surface,
 			title: input.title || `Dialogue on ${input.surface}`,
+			author: "yuriy",
 			created_at: timestamp,
 			updated_at: timestamp,
 			archived: false,
@@ -551,6 +622,7 @@ export class FactoryDialogueStore {
 			dialogue_id: dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
+			author: "yuriy",
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -559,6 +631,7 @@ export class FactoryDialogueStore {
 			dialogue_id: dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
+			author: "agent",
 			role_id: "DIALOGUE_STEWARD",
 			content: dialogueStewardResponse({
 				project,
@@ -598,6 +671,7 @@ export class FactoryDialogueStore {
 				project,
 				surface: input.surface,
 				title: input.title || `Dialogue on ${input.surface}`,
+				author: "yuriy",
 				created_at: timestamp,
 				updated_at: timestamp,
 				archived: false,
@@ -613,6 +687,7 @@ export class FactoryDialogueStore {
 				dialogue_id: dialogueId,
 				kind: "operator",
 				speaker: "Yuriy",
+				author: "yuriy",
 				content: input.message,
 				created_at: timestamp,
 			};
@@ -646,6 +721,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
+			author: "yuriy",
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -693,6 +769,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: input.kind,
 			speaker: input.speaker,
+			author: input.kind === "system" ? "system" : "agent",
 			role_id: input.roleId,
 			content: input.content,
 			created_at: nowIso(),
@@ -732,6 +809,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
+			author: "yuriy",
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -740,6 +818,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
+			author: "agent",
 			role_id: "DIALOGUE_STEWARD",
 			content: dialogueStewardResponse({
 				project,
@@ -1090,6 +1169,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
+			author: "agent",
 			role_id: "DIALOGUE_STEWARD",
 			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: ${cascadeLinks || "none"} and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,
 			created_at: nowIso(),

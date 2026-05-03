@@ -1,5 +1,9 @@
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useActiveProjectId } from "renderer/stores/active-project";
+import type {
+	AuthorAttribution,
+	StaleStateNotice,
+} from "lib/types/factory-operator-console";
 
 export type DialogueState =
 	| "needs_reply"
@@ -17,6 +21,7 @@ export interface DialogueRecord {
 	project: string;
 	surface: string;
 	title: string;
+	author?: string;
 	created_at: string;
 	updated_at: string;
 	archived: boolean;
@@ -27,6 +32,10 @@ export interface DialogueRecord {
 	messages_path: string;
 	message_count: number;
 	last_message_preview: string;
+	primary_agent: string;
+	participants: AuthorAttribution[];
+	is_mine: boolean;
+	stale_state_notice?: StaleStateNotice;
 }
 
 export interface DialogueAttentionCounts {
