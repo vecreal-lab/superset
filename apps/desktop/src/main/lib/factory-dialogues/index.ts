@@ -37,6 +37,15 @@ export type DialogueState = (typeof DIALOGUE_STATES)[number];
 export type DialogueMessageKind = "operator" | "agent" | "specialist" | "system";
 
 export const DEFAULT_DIALOGUE_PROJECT_ID = "software-factory";
+export const DEFAULT_CURRENT_OPERATOR_ID = "yuriy";
+const DEFAULT_CURRENT_OPERATOR_DISPLAY_NAME = "Yuriy";
+
+export interface DialogueParticipant {
+	user: string;
+	role?: string;
+	isAgent: boolean;
+	displayName: string;
+}
 
 export interface DialogueMessage {
 	id: string;
@@ -70,6 +79,10 @@ export interface DialogueRecord extends DialogueMetadata, DialogueStateFile {
 	messages_path: string;
 	message_count: number;
 	last_message_preview: string;
+	primary_agent: string;
+	assigned_operator_id: string;
+	is_mine: boolean;
+	participants: DialogueParticipant[];
 }
 
 export interface DialogueTurnResult {
@@ -133,6 +146,8 @@ export interface DialogueAttentionCounts {
 	by_surface: Record<string, number>;
 	by_state: Partial<Record<DialogueState, number>>;
 	items: DialogueRecord[];
+	operator_id: string;
+	workspace_id: string;
 }
 
 const HIGH_ATTENTION_STATES = new Set<DialogueState>([
@@ -145,6 +160,7 @@ const SURFACE_PRIMARY_AGENTS: Record<string, string> = {
 	home: "ORCH",
 	mission: "DOMAIN_KNOWLEDGE_STEWARD",
 	foundations: "DOMAIN_KNOWLEDGE_STEWARD",
+	intake: "INTAKE_STEWARD",
 	"work-orders": "ORCH",
 	approvals: "AUDIT",
 	"strategy-pulse": "STRATEGY_STEWARD",
@@ -267,6 +283,28 @@ function surfaceLabel(surface: string): string {
 function surfacePrimaryAgent(surface: string): string {
 	const normalized = surfaceSegments(surface).at(0) || "home";
 	return SURFACE_PRIMARY_AGENTS[normalized] || "ORCH";
+}
+
+function operatorParticipant(
+	operatorId = DEFAULT_CURRENT_OPERATOR_ID,
+): DialogueParticipant {
+	return {
+		user: operatorId,
+		isAgent: false,
+		displayName:
+			operatorId === DEFAULT_CURRENT_OPERATOR_ID
+				? DEFAULT_CURRENT_OPERATOR_DISPLAY_NAME
+				: operatorId,
+	};
+}
+
+function agentParticipant(roleId: string): DialogueParticipant {
+	return {
+		user: roleId.toLowerCase(),
+		role: roleId,
+		isAgent: true,
+		displayName: roleId,
+	};
 }
 
 function surfaceImpactSpecialist(surface: string): string | null {
@@ -461,6 +499,8 @@ export class FactoryDialogueStore {
 		const project = String(
 			metadataRaw.project || relativeParts[0] || DEFAULT_DIALOGUE_PROJECT_ID,
 		);
+		const primaryAgent = surfacePrimaryAgent(String(metadataRaw.surface || "unknown"));
+		const assignedOperatorId = DEFAULT_CURRENT_OPERATOR_ID;
 		return {
 			id: String(metadataRaw.id || path.basename(directory)),
 			project,
@@ -476,6 +516,13 @@ export class FactoryDialogueStore {
 			messages_path: normalizeSlashes(path.relative(this.root, path.join(directory, "messages.jsonl"))),
 			message_count: messages.length,
 			last_message_preview: previewMessage(messages),
+			primary_agent: primaryAgent,
+			assigned_operator_id: assignedOperatorId,
+			is_mine: true,
+			participants: [
+				operatorParticipant(assignedOperatorId),
+				agentParticipant(primaryAgent),
+			],
 		};
 	}
 
@@ -1209,13 +1256,26 @@ export class FactoryDialogueStore {
 	async attentionCounts(input: {
 		project?: string;
 		surface?: string;
+		operatorId?: string;
+		workspaceId?: string;
 	} = {}): Promise<DialogueAttentionCounts> {
+		const operatorId = safeSegment(input.operatorId || DEFAULT_CURRENT_OPERATOR_ID);
+		const workspaceId = safeSegment(
+			input.workspaceId || input.project || DEFAULT_DIALOGUE_PROJECT_ID,
+		);
 		const items = (
 			await this.list({ project: input.project, surface: input.surface })
-		).filter(
-			(record) =>
-				HIGH_ATTENTION_STATES.has(record.state) && operatorSurfaceKey(record.surface),
-		);
+		)
+			.map((record) => ({
+				...record,
+				is_mine: record.assigned_operator_id === operatorId,
+			}))
+			.filter(
+				(record) =>
+					record.is_mine &&
+					HIGH_ATTENTION_STATES.has(record.state) &&
+					operatorSurfaceKey(record.surface),
+			);
 		const by_project: Record<string, number> = {};
 		const by_surface: Record<string, number> = {};
 		const by_state: Partial<Record<DialogueState, number>> = {};
@@ -1232,6 +1292,8 @@ export class FactoryDialogueStore {
 			by_surface,
 			by_state,
 			items,
+			operator_id: operatorId,
+			workspace_id: workspaceId,
 		};
 	}
 }

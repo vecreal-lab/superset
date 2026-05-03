@@ -1,4 +1,3 @@
-import { Badge } from "@superset/ui/badge";
 import { cn } from "@superset/ui/utils";
 import { Link, useRouterState } from "@tanstack/react-router";
 import {
@@ -19,7 +18,7 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
-import { useIntakeAttentionCount } from "../../hooks/useIntakeAttentionCount";
+import { DialogueAttentionBadge } from "./components/DialogueAttentionBadge";
 import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
 import { ProjectSwitcher } from "./components/ProjectSwitcher";
 
@@ -115,8 +114,8 @@ const NAV_ITEMS: FactoryNavItem[] = [
 
 export function FactorySidebar() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
-	const { countForSurface } = useDialogueAttentionCounts();
-	const intakeAttention = useIntakeAttentionCount();
+	const { mineCountForSurface, hasMineAttentionForSurface } =
+		useDialogueAttentionCounts();
 
 	return (
 		<div className="flex h-full w-full flex-col overflow-hidden border-r bg-background">
@@ -142,10 +141,7 @@ export function FactorySidebar() {
 							: pathname === item.to ||
 								pathname === `${item.to}/` ||
 								pathname.startsWith(`${item.to}/`);
-						const attentionCount =
-							item.surface === "intake"
-								? intakeAttention.count
-								: countForSurface(item.surface);
+						const attentionCount = mineCountForSurface(item.surface);
 						return (
 							<li key={item.to}>
 								<Link
@@ -159,14 +155,11 @@ export function FactorySidebar() {
 									>
 									{item.icon}
 									<span className="truncate">{item.label}</span>
-									{attentionCount > 0 && (
-										<Badge
-											variant="secondary"
-											className="ml-auto min-w-5 justify-center px-1.5 py-0 text-[10px]"
-										>
-											{attentionCount}
-										</Badge>
-									)}
+									<DialogueAttentionBadge
+										count={attentionCount}
+										hasMineAttention={hasMineAttentionForSurface(item.surface)}
+										className="ml-auto"
+									/>
 								</Link>
 							</li>
 						);
