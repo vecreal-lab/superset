@@ -13,24 +13,225 @@ export interface WorkspaceContext {
 	isMultiUser: boolean;
 }
 
+declare global {
+	interface FactoryWorkspaceContext {
+		workspaceId: string;
+		projectId: string;
+		currentOperatorId: string;
+		currentOperatorDisplayName: string;
+	}
+}
+
+export type WorkOrderStatus =
+	| "queued"
+	| "in_flight"
+	| "completed"
+	| "superseded"
+	| "abandoned";
+
+export type WorkOrderRunState =
+	| "queued"
+	| "ready"
+	| "blocked"
+	| "running"
+	| "awaiting_approval"
+	| "completed"
+	| "failed"
+	| "canceled";
+
+export interface WorkOrderListItem {
+	id: string;
+	title: string;
+	status: WorkOrderStatus;
+	rigorTier: 1 | 2 | 3;
+	riskClassification: "low" | "medium" | "high";
+	author: AuthorAttribution;
+	assignedTo: AuthorAttribution;
+	projectId: string;
+	scope: "infrastructure" | "product" | "brand" | "docs" | "cleanup" | "other";
+	state: WorkOrderRunState;
+	blockedBy?: string[];
+	lastActivityAt: string;
+	hasOpenGate: boolean;
+	inFlightRunId?: string;
+}
+
+export interface VerificationCommand {
+	command: string;
+	cwd: string;
+	required: boolean;
+	rationale?: string;
+}
+
+export interface ProposedDecision {
+	id: string;
+	summary: string;
+}
+
+export interface WorkOrderDetail extends WorkOrderListItem {
+	context: string;
+	intent: string;
+	cites: string[];
+	allowedPaths: string[];
+	forbiddenPaths: string[];
+	acceptanceCriteria: string[];
+	verificationPlan: VerificationCommand[];
+	decisionContract: ProposedDecision[];
+	rollbackStrategy: string;
+	pipelineProfile: string;
+	pipelineVariant: string;
+	modifiesFactoryMachinery: boolean;
+	foundationClassAmendment: boolean;
+	runHistory: RunSummary[];
+	currentRun?: RunState;
+	pipelineStages: PipelineStage[];
+}
+
+export interface RunSummary {
+	runId: string;
+	workOrderId: string;
+	status: RunStatus;
+	startedAt: string;
+	completedAt?: string;
+	receiptPath?: string;
+}
+
+export type RunStatus =
+	| "pending"
+	| "running"
+	| "completed"
+	| "failed"
+	| "canceled"
+	| "paused_for_gate";
+
+export interface RunState {
+	runId: string;
+	workOrderId: string;
+	status: RunStatus;
+	startedAt: string;
+	completedAt?: string;
+	canceledAt?: string;
+	currentStageId?: string;
+	stages: StageRecord[];
+	triggeredBy: AuthorAttribution;
+	executedBy: AuthorAttribution;
+	manualInterventions: ManualIntervention[];
+}
+
+export interface StageRecord {
+	stageId: string;
+	stageName: string;
+	status: "pending" | "running" | "completed" | "failed" | "canceled";
+	startedAt?: string;
+	completedAt?: string;
+	receiptPath?: string;
+	outputs?: string[];
+}
+
+export interface ManualIntervention {
+	at: string;
+	reason: string;
+	proposedFix?: string;
+}
+
+export type RunStateEvent =
+	| { kind: "stage_started"; runId: string; stage: StageRecord }
+	| { kind: "stage_completed"; runId: string; stage: StageRecord; outputs: string[] }
+	| { kind: "stage_failed"; runId: string; stage: StageRecord; failureReason: string }
+	| { kind: "gate_required"; runId: string; gate: GateRequest }
+	| { kind: "mockups_generated"; runId: string; bundle: MockupBundle }
+	| {
+			kind: "manual_intervention_logged";
+			runId: string;
+			intervention: ManualIntervention;
+	  }
+	| { kind: "run_completed"; runId: string; finalReceipt: SynthesisPacket }
+	| { kind: "run_failed"; runId: string; reason: string }
+	| { kind: "run_canceled"; runId: string; canceledBy: AuthorAttribution };
+
+export type GateType =
+	| "mockup_approval"
+	| "design_review"
+	| "final_acceptance"
+	| "security_decision"
+	| "scope_approval"
+	| "merge_approval";
+
+export type GateChoice =
+	| { kind: "approve"; label: string }
+	| { kind: "revise"; label: string; promptForGuidance: true }
+	| { kind: "escalate"; label: string; targetRole?: string };
+
+export interface GateRequest {
+	gateId: string;
+	runId: string;
+	stageId: string;
+	type: GateType;
+	prompt: string;
+	context: string;
+	choices: GateChoice[];
+	requiresAuthor?: AuthorAttribution;
+	createdAt: string;
+}
+
+export interface GateResponse {
+	gateId: string;
+	runId: string;
+	decision: "approved" | "revision_requested" | "escalated";
+	guidanceText?: string;
+	decidedBy: AuthorAttribution;
+	decidedAt: string;
+}
+
+export interface MockupBundle {
+	bundleId: string;
+	runId: string;
+	stageId: string;
+	mockups: Mockup[];
+	approvalState: "pending" | "approved" | "partial" | "revisions_requested";
+	revisionCount: number;
+}
+
+export interface Mockup {
+	path: string;
+	index: number;
+	caption?: string;
+	generatedAt: string;
+	approvedAt?: string;
+	revisionRequestedAt?: string;
+	revisionGuidance?: string;
+	prompt?: string;
+	size?: string;
+}
+
 export interface StaleStateNotice {
-	sourcePath: string;
+	surface?: string;
+	lastSeenAt?: string;
+	upstreamCommit?: string;
+	changedAt?: string;
+	changedBy?: AuthorAttribution;
+	changeSummary?: string;
+	affectsCurrentDialogue?: boolean;
+	sourcePath?: string;
 	previousUpdatedAt?: string;
 	currentUpdatedAt?: string;
-	summary: string;
+	summary?: string;
 	acknowledged?: boolean;
 }
 
-export type DialogueAttentionState =
-	| "needs_reply"
-	| "awaiting_commit"
-	| "awaiting_confirmation"
-	| "agent_thinking"
-	| "idle_exploratory"
-	| "shelved"
-	| "cascade_pending"
-	| "abandoned"
-	| "committed_resolved";
+export interface DependencyEdge {
+	from: string;
+	to: string;
+	state: "pending" | "satisfied" | "broken";
+	reason?: string;
+}
+
+export interface DependencyGraph {
+	nodes: WorkOrderListItem[];
+	edges: DependencyEdge[];
+	parallelCohorts: string[][];
+	blockedQueue: string[];
+}
 
 export interface DialogueTurn {
 	turnId: string;
@@ -40,8 +241,23 @@ export interface DialogueTurn {
 	author: string;
 	agentRole?: string;
 	text: string;
+	attachedMockups?: MockupBundle;
+	attachedGate?: GateRequest;
 	timestamp: string;
 }
+
+export type DialogueAttentionState =
+	| "needs_your_reply"
+	| "needs_reply"
+	| "awaiting_commit"
+	| "awaiting_confirmation"
+	| "agent_thinking"
+	| "idle_exploratory"
+	| "shelved"
+	| "cascade_pending"
+	| "abandoned"
+	| "committed_and_resolved"
+	| "committed_resolved";
 
 export interface DialogueInventoryItem {
 	dialogueId: string;
@@ -53,6 +269,175 @@ export interface DialogueInventoryItem {
 	participants: AuthorAttribution[];
 	isMine: boolean;
 	staleStateNotice?: StaleStateNotice;
+}
+
+export interface PipelineStage {
+	stageId: string;
+	role: string;
+	label: string;
+	estimatedDurationMinutes?: number;
+	hasOwnerGate: boolean;
+	isParallelizable: boolean;
+}
+
+export interface AuditFinding {
+	findingId: string;
+	severity: "info" | "warning" | "blocker";
+	rule: string;
+	description: string;
+	affectedPaths?: string[];
+	recommendation?: string;
+	resolvedBy?: "auto" | "operator" | "agent";
+}
+
+export interface DomainKnowledgeRetrievalEvidence {
+	areasConsulted: string[];
+	filesLoaded: Array<{
+		path: string;
+		bytesLoaded: number;
+	}>;
+	tokenCountConsumed: number;
+	retrievalGaps: Array<{
+		area: string;
+		surfacedToSteward: boolean;
+	}>;
+}
+
+export interface SynthesisPacket {
+	runId: string;
+	workOrderId: string;
+	summary: string;
+	filesChanged: Array<{
+		path: string;
+		additions: number;
+		deletions: number;
+	}>;
+	verificationOutputs: Array<{
+		command: string;
+		status: "pass" | "fail" | "skip";
+		output?: string;
+	}>;
+	lessonCandidates: Array<{
+		title: string;
+		severity: "low" | "medium" | "high";
+	}>;
+	domainKnowledgeRetrievalEvidence: DomainKnowledgeRetrievalEvidence;
+	auditFindings: AuditFinding[];
+	decisionsRecorded: ProposedDecision[];
+	branchName: string;
+	submoduleChanged: boolean;
+}
+
+export type ArtifactReferenceKind =
+	| "work_order"
+	| "run"
+	| "foundation"
+	| "decision"
+	| "lesson"
+	| "role"
+	| "brand_atom"
+	| "feature"
+	| "project"
+	| "intake"
+	| "receipt"
+	| "other";
+
+export interface ArtifactReference {
+	referenceId: string;
+	kind: ArtifactReferenceKind;
+	label: string;
+	projectId?: string;
+	path?: string;
+	route?: string;
+	sourceSection?: string;
+	summary?: string;
+}
+
+export type CoordinatorRole = "PROJECT_COORDINATOR" | "UIUX_COORDINATOR";
+export type CoordinatorHandoffKind = "pc_to_uiux" | "uiux_to_pc" | "pc_to_pc";
+
+export interface CoordinatorEndpoint {
+	projectId: string;
+	coordinatorRole: CoordinatorRole;
+	dialoguePath: string;
+}
+
+export interface CoordinatorHandoff {
+	handoffId: string;
+	kind: CoordinatorHandoffKind;
+	status: "draft" | "pending_operator" | "accepted" | "returned" | "closed";
+	from: CoordinatorEndpoint;
+	to: CoordinatorEndpoint;
+	createdBy: AuthorAttribution;
+	createdAt: string;
+	summary: string;
+	requestedAction: string;
+	references: ArtifactReference[];
+	returnSummary?: string;
+	decidedBy?: AuthorAttribution;
+	decidedAt?: string;
+}
+
+export type RightRailItemKind =
+	| "pending_action"
+	| "running_work"
+	| "recently_completed"
+	| "blocked_or_error"
+	| "reference"
+	| "handoff";
+
+export interface RightRailItem {
+	itemId: string;
+	kind: RightRailItemKind;
+	title: string;
+	summary: string;
+	priority: "ambient" | "proactive" | "interrupting";
+	references: ArtifactReference[];
+	updatedAt: string;
+	expanded: boolean;
+	runState?: RunState;
+	gate?: GateRequest;
+	mockups?: MockupBundle;
+	mergePacket?: SynthesisPacket;
+	staleStateNotice?: StaleStateNotice;
+	handoff?: CoordinatorHandoff;
+}
+
+export interface RightRailState {
+	projectId: string;
+	coordinatorRole: CoordinatorRole;
+	activeItemId?: string;
+	items: RightRailItem[];
+	collapsed: boolean;
+	persistsAcrossModes: true;
+}
+
+export type CoordinatorMode =
+	| "general"
+	| "work_order_execution"
+	| "research_intake"
+	| "uiux"
+	| "onboarding_handoff"
+	| "review";
+
+export interface CoordinatorSurfaceContext {
+	projectId: string;
+	coordinatorRole: CoordinatorRole;
+	activeMode: CoordinatorMode;
+	activeDialogueId: string;
+	historyPath: string;
+	rightRail: RightRailState;
+	currentReferences: ArtifactReference[];
+}
+
+export interface HyperlinkedEntityMention {
+	mentionId: string;
+	dialogueId: string;
+	turnId: string;
+	displayText: string;
+	reference: ArtifactReference;
+	expansionTarget: "right_rail";
+	insertedBy: AuthorAttribution;
 }
 
 export type BrandAtomType =

@@ -1,116 +1,86 @@
 import { cn } from "@superset/ui/utils";
-import { Link, useRouterState } from "@tanstack/react-router";
-import {
-	BarChart3,
-	BookOpen,
-	CheckCircle2,
-	ClipboardList,
-	Compass,
-	FileText,
-	GitBranch,
-	Inbox,
-	Layers,
-	Lightbulb,
-	ListTree,
-	MessageSquare,
-	Target,
-	Users,
-} from "lucide-react";
-import type { ReactNode } from "react";
+import { useRouterState } from "@tanstack/react-router";
+import { DialogueAttentionBadge } from "renderer/components/factory-primitives/DialogueAttentionBadge";
 import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
-import { DialogueAttentionBadge } from "./components/DialogueAttentionBadge";
 import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
-import { ProjectSwitcher } from "./components/ProjectSwitcher";
 
 interface FactoryNavItem {
 	to: string;
 	label: string;
-	icon: ReactNode;
 	surface: string;
 	exact?: boolean;
 }
 
-const NAV_ITEMS: FactoryNavItem[] = [
+interface FactoryNavGroup {
+	label: string;
+	items: FactoryNavItem[];
+}
+
+const NAV_GROUPS: FactoryNavGroup[] = [
 	{
-		to: "/factory",
-		label: "Home",
-		icon: <Compass className="size-4" />,
-		surface: "home",
-		exact: true,
+		label: "Home / Overview",
+		items: [{ to: "/factory", label: "Home", surface: "home", exact: true }],
 	},
 	{
-		to: "/factory/mission",
-		label: "Mission",
-		icon: <Target className="size-4" />,
-		surface: "mission",
+		label: "Active Work",
+		items: [
+			{ to: "/factory/work-orders", label: "Work Orders", surface: "work-orders" },
+			{ to: "/factory/approvals", label: "Approvals", surface: "approvals" },
+			{ to: "/factory/dialogues", label: "Dialogues", surface: "dialogues" },
+			{ to: "/factory/intake", label: "Intake", surface: "intake" },
+		],
 	},
 	{
-		to: "/factory/foundations",
-		label: "Foundations",
-		icon: <Layers className="size-4" />,
-		surface: "foundations",
+		label: "Design + UIUX",
+		items: [
+			{ to: "/factory/design", label: "Design", surface: "design" },
+			{ to: "/factory/uiux", label: "UIUX Area", surface: "uiux" },
+		],
 	},
 	{
-		to: "/factory/intake",
-		label: "Intake",
-		icon: <Inbox className="size-4" />,
-		surface: "intake",
+		label: "Read / Reference",
+		items: [
+			{ to: "/factory/foundations", label: "Foundations", surface: "foundations" },
+			{ to: "/factory/decisions", label: "Decisions", surface: "decisions" },
+			{ to: "/factory/lessons", label: "Lessons", surface: "lessons" },
+			{ to: "/factory/roles", label: "Roles", surface: "roles" },
+			{
+				to: "/factory/strategy-pulse",
+				label: "Strategy Pulse",
+				surface: "strategy-pulse",
+			},
+			{
+				to: "/factory/build-vs-compose",
+				label: "Build vs Compose",
+				surface: "build-vs-compose",
+			},
+		],
 	},
 	{
-		to: "/factory/work-orders",
-		label: "Work Orders",
-		icon: <ClipboardList className="size-4" />,
-		surface: "work-orders",
+		label: "Audit / Review",
+		items: [
+			{ to: "/factory/audit-findings", label: "Audit Findings", surface: "audit" },
+			{
+				to: "/factory/synthesis-receipts",
+				label: "SYNTHESIS Receipts",
+				surface: "synthesis",
+			},
+		],
 	},
 	{
-		to: "/factory/decisions",
-		label: "Decisions",
-		icon: <ListTree className="size-4" />,
-		surface: "decisions",
-	},
-	{
-		to: "/factory/lessons",
-		label: "Lessons",
-		icon: <Lightbulb className="size-4" />,
-		surface: "lessons",
-	},
-	{
-		to: "/factory/projects",
-		label: "Projects",
-		icon: <FileText className="size-4" />,
-		surface: "projects",
-	},
-	{
-		to: "/factory/roles",
-		label: "Roles",
-		icon: <Users className="size-4" />,
-		surface: "roles",
-	},
-	{
-		to: "/factory/build-vs-compose",
-		label: "Build vs Compose",
-		icon: <GitBranch className="size-4" />,
-		surface: "build-vs-compose",
-	},
-	{
-		to: "/factory/strategy-pulse",
-		label: "Strategy Pulse",
-		icon: <BarChart3 className="size-4" />,
-		surface: "strategy-pulse",
-	},
-	{
-		to: "/factory/approvals",
-		label: "Approvals",
-		icon: <CheckCircle2 className="size-4" />,
-		surface: "approvals",
-	},
-	{
-		to: "/factory/dialogues",
-		label: "Dialogues",
-		icon: <MessageSquare className="size-4" />,
-		surface: "dialogues",
+		label: "System",
+		items: [{ to: "/factory/settings", label: "Settings", surface: "settings" }],
 	},
 ];
+
+function isActivePath(pathname: string, item: FactoryNavItem) {
+	if (item.exact) return pathname === item.to || pathname === `${item.to}/`;
+	return (
+		pathname === item.to ||
+		pathname === `${item.to}/` ||
+		pathname.startsWith(`${item.to}/`)
+	);
+}
 
 export function FactorySidebar() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -118,59 +88,57 @@ export function FactorySidebar() {
 		useDialogueAttentionCounts();
 
 	return (
-		<div className="flex h-full w-full flex-col overflow-hidden border-r bg-background">
-			<div className="flex items-center gap-2 px-4 py-4 border-b">
-				<div className="flex size-7 items-center justify-center rounded-md bg-primary/10">
-					<BookOpen className="size-4 text-primary" />
-				</div>
-				<div className="min-w-0">
-					<div className="text-sm font-semibold">Software Factory</div>
-					<div className="text-xs text-muted-foreground truncate">
-						Vertical AI cockpit
+		<aside
+			className="flex h-full w-full flex-col overflow-hidden border-r"
+			style={{
+				background: "var(--bg-sidebar-dark)",
+				color: "var(--text-dark-muted)",
+			}}
+			aria-label="Factory navigation"
+		>
+			<nav className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
+				{NAV_GROUPS.map((group) => (
+					<div key={group.label} className="mb-3">
+						<div
+							className="mb-1 px-2 font-mono text-[9px] font-semibold uppercase leading-none"
+							style={{ color: "var(--text-dark-tertiary)" }}
+						>
+							{group.label}
+						</div>
+						<ul className="flex flex-col gap-0.5">
+							{group.items.map((item) => {
+								const active = isActivePath(pathname, item);
+								const attentionCount = mineCountForSurface(item.surface);
+								return (
+									<li key={item.to}>
+										<a
+											href={item.to}
+											aria-current={active ? "page" : undefined}
+											className={cn(
+												"grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border-l-[3px] px-2 py-1 text-[12px] leading-none no-underline transition-colors",
+												active
+													? "border-l-[var(--accent)] text-[var(--text-dark-primary)]"
+													: "border-l-transparent hover:text-[var(--text-dark-primary)]",
+											)}
+										>
+											<span className="truncate">{item.label}</span>
+											<DialogueAttentionBadge
+												count={attentionCount}
+												hasMineAttention={hasMineAttentionForSurface(item.surface)}
+											/>
+										</a>
+									</li>
+								);
+							})}
+						</ul>
 					</div>
-				</div>
-			</div>
-			<div className="border-b px-4 py-3">
-				<ProjectSwitcher />
-			</div>
-			<nav className="flex-1 overflow-y-auto px-2 py-2">
-				<ul className="flex flex-col gap-0.5">
-					{NAV_ITEMS.map((item) => {
-						const isActive = item.exact
-							? pathname === item.to || pathname === `${item.to}/`
-							: pathname === item.to ||
-								pathname === `${item.to}/` ||
-								pathname.startsWith(`${item.to}/`);
-						const attentionCount = mineCountForSurface(item.surface);
-						return (
-							<li key={item.to}>
-								<Link
-									to={item.to}
-									className={cn(
-										"flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-sm transition-colors",
-										isActive
-											? "bg-accent text-accent-foreground"
-											: "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
-									)}
-									>
-									{item.icon}
-									<span className="truncate">{item.label}</span>
-									<DialogueAttentionBadge
-										count={attentionCount}
-										hasMineAttention={hasMineAttentionForSurface(item.surface)}
-										className="ml-auto"
-									/>
-								</Link>
-							</li>
-						);
-					})}
-				</ul>
+				))}
 			</nav>
-			<div className="border-t px-4 py-3 text-xs text-muted-foreground">
-				<div>v0 · local-only</div>
+			<div className="border-t px-4 py-3 text-xs" style={{ color: "var(--text-dark-muted)" }}>
+				<div>v0 local-only</div>
 				<div className="mt-0.5 truncate">FACTORY_LOCAL_ONLY=true</div>
 				<FactoryCliStatusBadges />
 			</div>
-		</div>
+		</aside>
 	);
 }
