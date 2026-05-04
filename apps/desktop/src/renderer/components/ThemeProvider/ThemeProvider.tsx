@@ -1,89 +1,53 @@
 import { useInsertionEffect, type ReactNode } from "react";
 import type { FactoryThemeMode } from "lib/stores/workspace";
+import designTokensSource from "../../../../../../../../projects/vecreal/drafts/brand-atoms/design-tokens.json";
 
 const FACTORY_THEME_STYLE_ID = "factory-brand-atom-theme";
 
+type TokenEntry = {
+	cssVariable?: string;
+	value?: string;
+};
+
+type DesignTokensSource = {
+	lockedRootVariables: TokenEntry[];
+	typography: Record<string, TokenEntry | undefined>;
+};
+
+const designTokens = designTokensSource as DesignTokensSource;
+
+const typographyTokenAliases = [
+	{ sourceKey: "font-sans", cssVariable: "--font-ui" },
+	{ sourceKey: "font-mono", cssVariable: "--font-mono" },
+] as const;
+
+/*
+Brand atom mapping:
+- lockedRootVariables entries inject their own cssVariable names directly.
+- typography font rows bridge to the factory font aliases used by shell CSS.
+- semantic aliases below only point at variables injected from the JSON source.
+*/
+function collectBrandTokenValues(): Record<string, string> {
+	const values: Record<string, string> = {};
+
+	for (const token of designTokens.lockedRootVariables) {
+		if (token.cssVariable && token.value) {
+			values[token.cssVariable] = token.value;
+		}
+	}
+
+	for (const { sourceKey, cssVariable } of typographyTokenAliases) {
+		const token = designTokens.typography[sourceKey];
+		if (token?.value) {
+			values[cssVariable] = token.value;
+		}
+	}
+
+	return values;
+}
+
 const baseTokenValues: Record<string, string> = {
-	"--font-ui": '"Inter", system-ui, sans-serif',
-	"--font-mono": '"JetBrains Mono", ui-monospace, monospace',
-	"--bg-app-light": "#FAFAF8",
-	"--bg-card-light": "#FFFFFF",
-	"--bg-card-light-bottom": "#FBFAF7",
-	"--bg-soft-light": "#F4F4F1",
-	"--bg-hover-light": "#EFEFEC",
-	"--border-light": "#E8E6E0",
-	"--border-light-subtle": "#F0EEE8",
-	"--border-light-strong": "#D6D3CB",
-	"--bg-sidebar-dark": "#0a0b0d",
-	"--bg-app-dark": "#131517",
-	"--bg-card-dark-top": "#21242a",
-	"--bg-card-dark-bottom": "#1c1e23",
-	"--bg-pill-dark": "#1f2126",
-	"--bg-cta-dark": "#1F1D1A",
-	"--border-dark": "#2d2f36",
-	"--border-dark-subtle": "#1d1f24",
-	"--text-light-primary": "#1F1D1A",
-	"--text-light-secondary": "#5A5550",
-	"--text-light-tertiary": "#918A82",
-	"--text-light-disabled": "#B8B2A8",
-	"--text-dark-primary": "#f7f8f8",
-	"--text-dark-body": "#d0d6e0",
-	"--text-dark-muted": "#9097a1",
-	"--text-dark-tertiary": "#62666d",
-	"--text-dark-disabled": "#5a5e66",
-	"--clay-light": "#A05847",
-	"--clay-bright": "#C68070",
-	"--clay": "#7A3D32",
-	"--clay-dark": "#5C2D26",
-	"--success": "#5DA17D",
-	"--success-dark": "#4A8A68",
-	"--warning-light": "#A87A2E",
-	"--warning-dark": "#D4A960",
-	"--error": "#C95151",
-	"--error-dark": "#B53D3D",
-	"--info": "#5A6878",
-	"--sp-0": "0",
-	"--sp-1": "2px",
-	"--sp-2": "4px",
-	"--sp-3": "6px",
-	"--sp-4": "8px",
-	"--sp-5": "10px",
-	"--sp-6": "12px",
-	"--sp-7": "14px",
-	"--sp-8": "16px",
-	"--sp-9": "20px",
-	"--sp-10": "24px",
-	"--sp-11": "32px",
-	"--sp-12": "40px",
-	"--sp-13": "56px",
-	"--sp-14": "80px",
-	"--r-1": "3px",
-	"--r-2": "4px",
-	"--r-3": "5px",
-	"--r-4": "6px",
-	"--r-5": "7px",
-	"--r-6": "8px",
-	"--r-7": "10px",
-	"--r-full": "999px",
-	"--motion-instant": "0ms",
-	"--motion-fast": "120ms",
-	"--motion-medium": "180ms",
-	"--motion-slow": "240ms",
-	"--motion-page": "320ms",
-	"--ease-out": "cubic-bezier(0.2, 0.8, 0.2, 1)",
-	"--ease-in": "cubic-bezier(0.4, 0, 0.6, 0.4)",
-	"--ease-in-out": "cubic-bezier(0.4, 0, 0.2, 1)",
-	"--ease-spring": "cubic-bezier(0.16, 1, 0.3, 1)",
-	"--shadow-card-dark":
-		"0 1px 0 rgb(255 255 255 / 0.05) inset, 0 1px 4px rgb(0 0 0 / 0.4)",
-	"--shadow-card-light":
-		"0 1px 0 rgb(255 255 255 / 0.6) inset, 0 1px 3px rgb(31 29 26 / 0.05)",
-	"--shadow-modal-dark":
-		"0 1px 0 rgb(255 255 255 / 0.06) inset, 0 16px 48px rgb(0 0 0 / 0.6)",
-	"--shadow-modal-light":
-		"0 1px 0 rgb(255 255 255 / 0.7) inset, 0 16px 48px rgb(31 29 26 / 0.18)",
-	"--focus-ring": "0 0 0 3px rgb(160 88 71 / 0.5)",
-	"--focus-ring-soft": "0 0 0 3px rgb(160 88 71 / 0.18)",
+	...collectBrandTokenValues(),
 	"--factory-border-width": "1px",
 	"--factory-control-height": "32px",
 	"--factory-composer-height": "56px",
@@ -115,7 +79,9 @@ const darkSemanticTokenValues: Record<string, string> = {
 	"--shadow-modal": "var(--shadow-modal-dark)",
 	"--button-primary-bg": "var(--bg-cta-dark)",
 	"--button-primary-fg": "var(--text-dark-primary)",
-	"--button-secondary-bg": "transparent",
+	"--button-secondary-bg": "var(--bg-card)",
+	"--button-ghost-bg": "var(--bg-app)",
+	"--button-ghost-border": "var(--bg-app)",
 	"--button-disabled-bg": "var(--bg-soft)",
 	"--button-disabled-fg": "var(--text-disabled)",
 };
@@ -139,7 +105,9 @@ const lightSemanticTokenValues: Record<string, string> = {
 	"--shadow-modal": "var(--shadow-modal-light)",
 	"--button-primary-bg": "var(--text-light-primary)",
 	"--button-primary-fg": "var(--text-dark-primary)",
-	"--button-secondary-bg": "transparent",
+	"--button-secondary-bg": "var(--bg-card)",
+	"--button-ghost-bg": "var(--bg-app)",
+	"--button-ghost-border": "var(--bg-app)",
 	"--button-disabled-bg": "var(--bg-soft-light)",
 	"--button-disabled-fg": "var(--text-light-disabled)",
 };
@@ -211,14 +179,9 @@ const factoryCss = `
 	color: var(--text-primary);
 }
 .factory-button--ghost {
-	background: transparent;
-	border-color: transparent;
+	background: var(--button-ghost-bg);
+	border-color: var(--button-ghost-border);
 	color: var(--text-secondary);
-}
-.factory-button--clay {
-	background: var(--accent-strong);
-	color: var(--text-dark-primary);
-	border-color: var(--accent-strong);
 }
 .factory-button:disabled,
 .factory-icon-button:disabled {
