@@ -788,10 +788,8 @@ function ProjectCoordinatorPage() {
 
 	const composerReferences = useMemo(() => {
 		if (preloadedComposerReference) return [preloadedComposerReference];
-		return coordinatorContext.currentReferences.length > 0
-			? coordinatorContext.currentReferences
-			: [projectReference(project, routeData.projectId)];
-	}, [coordinatorContext.currentReferences, preloadedComposerReference, project, routeData.projectId]);
+		return [];
+	}, [preloadedComposerReference]);
 
 	const attachReference = useCallback(() => {
 		const reference = projectReference(project, routeData.projectId);
@@ -974,6 +972,7 @@ function ProjectCoordinatorPage() {
 				inlineCards={inlineCards}
 				draftComposerText={draftComposerText}
 				composerReferences={composerReferences}
+				isPending={Boolean(pendingTurn)}
 				onSend={handleSend}
 				onAttach={attachReference}
 				onDraftChange={(nextDraft) =>

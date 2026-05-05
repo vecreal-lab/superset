@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import { ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
 import type {
 	ArtifactReference,
@@ -12,7 +12,7 @@ import { MockupApprovalGrid } from "../MockupApprovalGrid";
 import { PipelineStrip } from "../PipelineStrip";
 import { RunStatusBadge } from "../RunStatusBadge";
 import { StaleStateNotice } from "../StaleStateNotice";
-import { PrimitiveButton, PrimitiveIcon, cardPaddingStyle, mutedTextStyle, rowStyle, stackStyle } from "../common";
+import { PrimitiveButton, PrimitiveIcon, mutedTextStyle, stackStyle } from "../common";
 import { HandoffCard } from "./HandoffCard";
 
 export interface RightRailContextPanelProps {
@@ -29,10 +29,6 @@ export interface RightRailContextPanelProps {
 	onApproveGate?: (item: RightRailItem) => void;
 }
 
-function itemKindLabel(kind: RightRailItem["kind"]): string {
-	return kind.replace(/_/g, " ");
-}
-
 function groupItems(items: RightRailItem[], kind: RightRailItem["kind"]) {
 	return items.filter((item) => item.kind === kind);
 }
@@ -43,6 +39,65 @@ function badgeStateForRunStatus(
 	if (status === "paused_for_gate") return "awaiting_approval";
 	if (status === "pending") return "queued";
 	return status;
+}
+
+const sectionHeadingStyle: CSSProperties = {
+	margin: 0,
+	textTransform: "uppercase",
+	fontFamily: "var(--font-mono)",
+	fontSize: "var(--fs-caption)",
+	color: "var(--text-tertiary)",
+	letterSpacing: 0,
+};
+
+const compactActionStyle: CSSProperties = {
+	width: "100%",
+	minWidth: 0,
+	height: "auto",
+	minHeight: "var(--factory-control-height)",
+	justifyContent: "center",
+	padding: "var(--sp-2) var(--sp-4)",
+	whiteSpace: "normal",
+	lineHeight: 1.2,
+	overflowWrap: "anywhere",
+};
+
+function ProjectStatusStrip({ state }: { state: RightRailState }) {
+	const runningCount = groupItems(state.items, "running_work").length;
+	const approvalCount = groupItems(state.items, "pending_action").length;
+	const blockedCount = groupItems(state.items, "blocked_or_error").length;
+	const gateLabel =
+		blockedCount > 0
+			? `${blockedCount} needs attention`
+			: approvalCount > 0
+				? `${approvalCount} gate pending`
+				: "all gates green";
+
+	return (
+		<section
+			aria-label="Project status"
+			style={{
+				...stackStyle,
+				gap: "var(--sp-3)",
+				padding: "var(--sp-4)",
+				border: "var(--factory-border-width) solid var(--border)",
+				borderRadius: "var(--r-card)",
+				background: "var(--bg-soft)",
+			}}
+		>
+			<h2 style={sectionHeadingStyle}>Project status</h2>
+			<div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-2)" }}>
+				<span className="factory-chip">{runningCount} WOs</span>
+				<span className="factory-chip">{approvalCount} approvals</span>
+				<span
+					className="factory-chip"
+					style={{ borderColor: "var(--success)", color: "var(--success)" }}
+				>
+					{gateLabel}
+				</span>
+			</div>
+		</section>
+	);
 }
 
 function RightRailCard({
@@ -63,74 +118,123 @@ function RightRailCard({
 	return (
 		<article
 			className="factory-card"
-			style={{ ...cardPaddingStyle, ...stackStyle }}
+			style={{
+				...stackStyle,
+				gap: "var(--sp-4)",
+				minWidth: 0,
+				padding: "var(--sp-5)",
+				overflow: "hidden",
+			}}
 			data-rail-item-kind={item.kind}
 		>
 			<button
 				type="button"
-				className="factory-button factory-button--ghost"
 				onClick={() => onExpandItem?.(item.itemId)}
-				style={{ justifyContent: "space-between", width: "100%" }}
+				aria-expanded={item.expanded}
+				style={{
+					display: "grid",
+					gridTemplateColumns: "minmax(0, 1fr) auto",
+					alignItems: "start",
+					gap: "var(--sp-3)",
+					width: "100%",
+					minWidth: 0,
+					padding: 0,
+					border: 0,
+					background: "transparent",
+					color: "inherit",
+					textAlign: "left",
+					cursor: "pointer",
+				}}
 			>
-				<span style={{ textAlign: "left" }}>
-					<strong>{item.title}</strong>
-					<span style={{ display: "block", ...mutedTextStyle }}>{item.summary}</span>
+				<span style={{ minWidth: 0 }}>
+					<strong style={{ display: "block", overflowWrap: "anywhere" }}>{item.title}</strong>
+					<span
+						style={{
+							display: "block",
+							marginTop: "var(--sp-2)",
+							lineHeight: 1.35,
+							overflowWrap: "anywhere",
+							...mutedTextStyle,
+						}}
+					>
+						{item.summary}
+					</span>
 				</span>
-				<PrimitiveIcon icon={ChevronRight} />
+				<PrimitiveIcon
+					icon={ChevronRight}
+					style={{
+						color: "var(--text-tertiary)",
+						transform: item.expanded ? "rotate(90deg)" : undefined,
+					}}
+				/>
 			</button>
-			{item.expanded && item.gate && (
-				<GateCard request={item.gate} onApprove={() => onApproveGate?.(item)} />
-			)}
-			{item.expanded && item.mockups && <MockupApprovalGrid bundle={item.mockups} />}
-			{item.expanded && item.mergePacket && <MergePacket packet={item.mergePacket} />}
-			{item.expanded && item.runState && (
-				<div style={stackStyle}>
-					<RunStatusBadge state={badgeStateForRunStatus(item.runState.status)} />
-					<PipelineStrip
-						stages={item.runState.stages.map((stage) => ({
-							stageId: stage.stageId,
-							role: stage.stageName,
-							label: stage.stageName,
-							hasOwnerGate: false,
-							isParallelizable: false,
-						}))}
-						currentStageId={item.runState.currentStageId}
-					/>
+			{item.expanded ? (
+				<div style={{ ...stackStyle, gap: "var(--sp-4)", minWidth: 0 }}>
+					{item.gate ? (
+						<GateCard request={item.gate} onApprove={() => onApproveGate?.(item)} />
+					) : null}
+					{item.mockups ? <MockupApprovalGrid bundle={item.mockups} /> : null}
+					{item.mergePacket ? <MergePacket packet={item.mergePacket} /> : null}
+					{item.runState ? (
+						<div style={{ ...stackStyle, gap: "var(--sp-4)", minWidth: 0 }}>
+							<RunStatusBadge state={badgeStateForRunStatus(item.runState.status)} />
+							<PipelineStrip
+								stages={item.runState.stages.map((stage) => ({
+									stageId: stage.stageId,
+									role: stage.stageName,
+									label: stage.stageName,
+									hasOwnerGate: false,
+									isParallelizable: false,
+								}))}
+								currentStageId={item.runState.currentStageId}
+							/>
+						</div>
+					) : null}
+					{item.staleStateNotice ? (
+						<StaleStateNotice notice={item.staleStateNotice} />
+					) : null}
+					{item.handoff ? (
+						<HandoffCard handoff={item.handoff} onAccept={onAcceptHandoff} />
+					) : null}
 				</div>
-			)}
-			{item.expanded && item.staleStateNotice && (
-				<StaleStateNotice notice={item.staleStateNotice} />
-			)}
-			{item.expanded && item.handoff && (
-				<HandoffCard handoff={item.handoff} onAccept={onAcceptHandoff} />
-			)}
-			{item.references.length > 0 && (
-				<div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-3)" }}>
+			) : null}
+			{item.references.length > 0 ? (
+				<div
+					aria-label="Item references"
+					style={{
+						display: "grid",
+						gridTemplateColumns: "repeat(auto-fit, minmax(var(--sp-14), 1fr))",
+						gap: "var(--sp-3)",
+						minWidth: 0,
+					}}
+				>
 					{item.references.map((reference) => (
-						<span key={reference.referenceId} style={rowStyle}>
+						<div key={reference.referenceId} style={{ display: "grid", gap: "var(--sp-2)" }}>
 							<button
 								type="button"
 								className="factory-button factory-button--ghost"
+								style={compactActionStyle}
 								data-rail-target={reference.referenceId}
 								data-rail-target-kind={reference.kind}
 								onClick={() => onOpenReference?.(reference)}
 							>
 								{reference.label}
 							</button>
-							{onChatWithReference && (
+							{onChatWithReference ? (
 								<button
 									type="button"
 									className="factory-button factory-button--ghost"
+									style={compactActionStyle}
 									data-chat-with-pc={reference.referenceId}
 									onClick={() => onChatWithReference(reference)}
 								>
 									Chat about this with PC
 								</button>
-							)}
-						</span>
+							) : null}
+						</div>
 					))}
 				</div>
-			)}
+			) : null}
 		</article>
 	);
 }
@@ -213,6 +317,7 @@ export function RightRailContextPanel({
 		["reference", "Reference"],
 		["handoff", "Handoffs"],
 	];
+	const collapseLabel = state.collapsed ? "Expand right rail" : "Collapse right rail";
 
 	return (
 		<aside
@@ -246,10 +351,30 @@ export function RightRailContextPanel({
 					if (event.key === "ArrowRight") commitWidth(widthPx - 16);
 				}}
 			/>
-			<div style={{ ...stackStyle, height: "100%", padding: "var(--sp-6)", overflow: "auto" }}>
-				<header style={{ ...rowStyle, justifyContent: "space-between" }}>
-					<strong>{state.projectId}</strong>
-					<PrimitiveButton variant="ghost" onClick={onCollapse}>
+			<div
+				style={{
+					...stackStyle,
+					gap: "var(--sp-5)",
+					height: "100%",
+					padding: "var(--sp-6)",
+					overflow: "auto",
+				}}
+			>
+				<header
+					style={{
+						display: "flex",
+						alignItems: "center",
+						justifyContent: "space-between",
+						gap: "var(--sp-3)",
+					}}
+				>
+					<strong style={{ minWidth: 0, overflowWrap: "anywhere" }}>{state.projectId}</strong>
+					<PrimitiveButton
+						variant="ghost"
+						aria-label={collapseLabel}
+						title={collapseLabel}
+						onClick={onCollapse}
+					>
 						{state.collapsed ? (
 							<PrimitiveIcon icon={PanelRightOpen} />
 						) : (
@@ -258,43 +383,35 @@ export function RightRailContextPanel({
 					</PrimitiveButton>
 				</header>
 				{state.collapsed ? null : (
-					sections.map(([kind, label]) => {
-						const items = groupItems(state.items, kind);
-						if (items.length === 0) return null;
-						return (
-							<section key={kind} style={stackStyle} aria-label={label}>
-								<h2
-									style={{
-										margin: 0,
-										textTransform: "uppercase",
-										fontFamily: "var(--font-mono)",
-										fontSize: "var(--sp-5)",
-										color: "var(--text-tertiary)",
-									}}
-								>
-									{label}
-								</h2>
-								{items.map((item) => (
-									<RightRailCard
-										key={item.itemId}
-										item={item}
-										onExpandItem={onExpandItem}
-										onOpenReference={onOpenReference}
-										onChatWithReference={onChatWithReference}
-										onAcceptHandoff={onAcceptHandoff}
-										onApproveGate={onApproveGate}
-									/>
-								))}
-							</section>
-						);
-					})
+					<>
+						<ProjectStatusStrip state={state} />
+						{sections.map(([kind, label]) => {
+							const items = groupItems(state.items, kind);
+							if (items.length === 0) return null;
+							return (
+								<section key={kind} style={stackStyle} aria-label={label}>
+									<h2 style={sectionHeadingStyle}>{label}</h2>
+									{items.map((item) => (
+										<RightRailCard
+											key={item.itemId}
+											item={item}
+											onExpandItem={onExpandItem}
+											onOpenReference={onOpenReference}
+											onChatWithReference={onChatWithReference}
+											onAcceptHandoff={onAcceptHandoff}
+											onApproveGate={onApproveGate}
+										/>
+									))}
+								</section>
+							);
+						})}
+					</>
 				)}
-				{!state.collapsed && state.items.length === 0 && (
+				{!state.collapsed && state.items.length === 0 ? (
 					<p style={mutedTextStyle}>
 						No items pending. Coordinator will surface relevant items as you work.
 					</p>
-				)}
-				<span style={{ display: "none" }}>{itemKindLabel("pending_action")}</span>
+				) : null}
 			</div>
 		</aside>
 	);

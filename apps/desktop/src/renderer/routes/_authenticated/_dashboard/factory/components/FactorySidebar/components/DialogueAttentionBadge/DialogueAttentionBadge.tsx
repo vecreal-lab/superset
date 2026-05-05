@@ -25,10 +25,9 @@ export function DialogueAttentionBadge({
 			style={
 				hasMineAttention
 					? {
-							backgroundColor:
-								"color-mix(in srgb, var(--clay-light) 12%, transparent)",
-							borderColor: "var(--clay-light)",
-							color: "var(--clay-light)",
+							backgroundColor: "var(--bg-soft)",
+							borderColor: "var(--accent)",
+							color: "var(--accent)",
 						}
 					: undefined
 			}

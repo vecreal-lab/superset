@@ -1,6 +1,7 @@
 import { cn } from "@superset/ui/utils";
 import { useRouterState } from "@tanstack/react-router";
 import { DialogueAttentionBadge } from "renderer/components/factory-primitives/DialogueAttentionBadge";
+import { useFactoryActiveProjectId } from "lib/stores/workspace";
 import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
 import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
 
@@ -9,6 +10,8 @@ interface FactoryNavItem {
 	label: string;
 	surface: string;
 	exact?: boolean;
+	activePrefix?: string;
+	projectScoped?: boolean;
 }
 
 interface FactoryNavGroup {
@@ -24,6 +27,13 @@ const NAV_GROUPS: FactoryNavGroup[] = [
 	{
 		label: "Active Work",
 		items: [
+			{
+				to: "/factory/projects",
+				label: "Project Coordinator",
+				surface: "project-coordinator",
+				activePrefix: "/factory/projects",
+				projectScoped: true,
+			},
 			{ to: "/factory/work-orders", label: "Work Orders", surface: "work-orders" },
 			{ to: "/factory/approvals", label: "Approvals", surface: "approvals" },
 			{ to: "/factory/dialogues", label: "Dialogues", surface: "dialogues" },
@@ -73,17 +83,23 @@ const NAV_GROUPS: FactoryNavGroup[] = [
 	},
 ];
 
-function isActivePath(pathname: string, item: FactoryNavItem) {
-	if (item.exact) return pathname === item.to || pathname === `${item.to}/`;
+function hrefForItem(item: FactoryNavItem, activeProjectId: string) {
+	return item.projectScoped ? `${item.to}/${activeProjectId}` : item.to;
+}
+
+function isActivePath(pathname: string, item: FactoryNavItem, href: string) {
+	const activeRoot = item.activePrefix ?? href;
+	if (item.exact) return pathname === href || pathname === `${href}/`;
 	return (
-		pathname === item.to ||
-		pathname === `${item.to}/` ||
-		pathname.startsWith(`${item.to}/`)
+		pathname === activeRoot ||
+		pathname === `${activeRoot}/` ||
+		pathname.startsWith(`${activeRoot}/`)
 	);
 }
 
 export function FactorySidebar() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
+	const activeProjectId = useFactoryActiveProjectId();
 	const { mineCountForSurface, hasMineAttentionForSurface } =
 		useDialogueAttentionCounts();
 
@@ -107,12 +123,13 @@ export function FactorySidebar() {
 						</div>
 						<ul className="flex flex-col gap-0.5">
 							{group.items.map((item) => {
-								const active = isActivePath(pathname, item);
+								const href = hrefForItem(item, activeProjectId);
+								const active = isActivePath(pathname, item, href);
 								const attentionCount = mineCountForSurface(item.surface);
 								return (
-									<li key={item.to}>
+									<li key={`${item.surface}-${href}`}>
 										<a
-											href={item.to}
+											href={href}
 											aria-current={active ? "page" : undefined}
 											className={cn(
 												"grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border-l-[3px] px-2 py-1 text-[12px] leading-none no-underline transition-colors",

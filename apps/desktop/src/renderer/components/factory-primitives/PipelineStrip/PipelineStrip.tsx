@@ -37,6 +37,10 @@ export function PipelineStrip({
 				const isCompleted =
 					completedStageIds.includes(stage.stageId) ||
 					(activeIndex > -1 && index < activeIndex);
+				const previousStage = stages[index - 1];
+				const previousCompleted =
+					Boolean(previousStage && completedStageIds.includes(previousStage.stageId)) ||
+					(activeIndex > -1 && index - 1 < activeIndex);
 				const isActive = stage.stageId === currentStageId;
 				const isFailed = failedStageIds.includes(stage.stageId);
 				return (
@@ -48,6 +52,7 @@ export function PipelineStrip({
 							isFailed && "pipeline-step-failed",
 						)}
 						style={{
+							position: "relative",
 							display: "grid",
 							justifyItems: "center",
 							gap: "var(--sp-2)",
@@ -63,8 +68,24 @@ export function PipelineStrip({
 							textAlign: "center",
 						}}
 					>
+						{layout === "horizontal" && index > 0 ? (
+							<span
+								aria-hidden="true"
+								style={{
+									position: "absolute",
+									top: "calc(var(--sp-10) / 2)",
+									right: "50%",
+									width: "calc(100% + var(--sp-5))",
+									height: "var(--factory-border-width)",
+									background: previousCompleted ? "var(--success)" : "var(--border)",
+									zIndex: 0,
+								}}
+							/>
+						) : null}
 						<span
 							style={{
+								position: "relative",
+								zIndex: 1,
 								display: "inline-grid",
 								placeItems: "center",
 								width: "var(--sp-10)",

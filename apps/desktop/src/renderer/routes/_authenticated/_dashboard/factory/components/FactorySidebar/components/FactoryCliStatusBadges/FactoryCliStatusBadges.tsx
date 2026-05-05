@@ -1,6 +1,5 @@
 import { Badge } from "@superset/ui/badge";
 import { Button } from "@superset/ui/button";
-import { cn } from "@superset/ui/utils";
 import { RotateCcw } from "lucide-react";
 import { useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -39,17 +38,17 @@ export function FactoryCliStatusBadges() {
 						>
 							<span>{providerLabel(provider)}</span>
 							<Badge
-								variant={connected ? "secondary" : "destructive"}
-								className={cn(
-									"h-5 gap-1 px-1.5 text-[10px]",
-									connected && "bg-emerald-500/15 text-emerald-600",
-								)}
+								variant="outline"
+								className="h-5 gap-1 px-1.5 text-[10px]"
+								style={{
+									background: "var(--bg-soft)",
+									borderColor: connected ? "var(--success)" : "var(--error)",
+									color: connected ? "var(--success)" : "var(--error)",
+								}}
 							>
 								<span
-									className={cn(
-										"size-1.5 rounded-full",
-										connected ? "bg-emerald-500" : "bg-destructive-foreground",
-									)}
+									className="size-1.5 rounded-full"
+									style={{ background: connected ? "var(--success)" : "var(--error)" }}
 								/>
 								{connected ? "Connected" : "Disconnected"}
 							</Badge>
