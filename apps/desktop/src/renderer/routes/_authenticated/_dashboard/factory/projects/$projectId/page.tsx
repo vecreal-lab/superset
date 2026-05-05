@@ -308,6 +308,10 @@ function rightRailItemsSignature(items: RightRailItem[]): string {
 		.join("|");
 }
 
+function railAcknowledgementKey(item: RightRailItem): string {
+	return `${item.itemId}:${item.updatedAt}`;
+}
+
 function sameRightRailState(a: RightRailState, b: RightRailState): boolean {
 	return (
 		a.projectId === b.projectId &&
@@ -607,6 +611,9 @@ function ProjectCoordinatorPage() {
 	const [streamingTurn, setStreamingTurn] =
 		useState<CoordinatorDialogueTurn | null>(null);
 	const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
+	const [acknowledgedRailItemKeys, setAcknowledgedRailItemKeys] = useState<
+		Set<string>
+	>(() => new Set());
 
 	useEffect(() => {
 		const nextRightRail = routeData.coordinatorRightRail ?? fallbackRightRailState;
@@ -641,8 +648,15 @@ function ProjectCoordinatorPage() {
 		setDraftComposerText(routeData.projectId, payload.suggestedPrompt ?? "");
 	}, [routeData.projectId, setDraftComposerText]);
 
-	const liveRightRailItems =
+	const sourceRightRailItems =
 		rightRailItems.length > 0 ? rightRailItems : baseRightRailState.items;
+	const liveRightRailItems = useMemo(
+		() =>
+			sourceRightRailItems.filter(
+				(item) => !acknowledgedRailItemKeys.has(railAcknowledgementKey(item)),
+			),
+		[sourceRightRailItems, acknowledgedRailItemKeys],
+	);
 	const liveRightRailState: RightRailState = useMemo(
 		() => ({
 			...baseRightRailState,
@@ -764,6 +778,29 @@ function ProjectCoordinatorPage() {
 			commitRightRailState({
 				...liveRightRailState,
 				activeItemId: itemId,
+				items: nextItems,
+			});
+		},
+		[commitRightRailState, liveRightRailState],
+	);
+
+	const acknowledgeRailItem = useCallback(
+		(itemId: string) => {
+			const item = liveRightRailState.items.find((entry) => entry.itemId === itemId);
+			if (!item) return;
+			const acknowledgementKey = railAcknowledgementKey(item);
+			setAcknowledgedRailItemKeys((current) => {
+				if (current.has(acknowledgementKey)) return current;
+				const next = new Set(current);
+				next.add(acknowledgementKey);
+				return next;
+			});
+			const nextItems = liveRightRailState.items.filter(
+				(entry) => railAcknowledgementKey(entry) !== acknowledgementKey,
+			);
+			commitRightRailState({
+				...liveRightRailState,
+				activeItemId: nextItems[0]?.itemId,
 				items: nextItems,
 			});
 		},
@@ -954,6 +991,7 @@ function ProjectCoordinatorPage() {
 			onExpandItem={toggleRailItem}
 			onOpenReference={activateReference}
 			onChatWithReference={chatAboutReference}
+			onAcknowledgeItem={acknowledgeRailItem}
 			onApproveGate={approveRailGate}
 		/>
 	);

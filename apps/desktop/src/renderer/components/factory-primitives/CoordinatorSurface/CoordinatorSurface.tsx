@@ -14,6 +14,14 @@ import { ResearchAttachmentDropZone } from "./ResearchAttachmentDropZone";
 
 type CoordinatorSurfaceTurn = DialogueTurn | CoordinatorDialogueTurn;
 
+const pcTagStyle: CSSProperties = {
+	height: "var(--sp-9)",
+	padding: "0 var(--sp-4)",
+	fontFamily: "var(--font-mono)",
+	fontSize: "var(--sp-5)",
+	fontWeight: 600,
+};
+
 export interface CoordinatorSurfaceProps {
 	context: CoordinatorSurfaceContext;
 	turns: CoordinatorSurfaceTurn[];
@@ -253,7 +261,9 @@ function FirstArrivalState({
 			}}
 		>
 			<div style={{ display: "flex", alignItems: "center", gap: "var(--sp-3)" }}>
-				<span className="factory-chip factory-chip--attention">PC</span>
+				<span className="factory-chip factory-chip--attention" style={pcTagStyle}>
+					PC
+				</span>
 				<strong>Project Coordinator</strong>
 			</div>
 			<p style={{ margin: "var(--sp-3) 0 0", lineHeight: 1.5 }}>
@@ -342,7 +352,9 @@ function DialogueTurnView({
 					}}
 				>
 					<AuthorChip attribution={turnAuthor(turn)} size="sm" variant="inline" />
-					<span className="factory-chip factory-chip--attention">PC</span>
+					<span className="factory-chip factory-chip--attention" style={pcTagStyle}>
+						PC
+					</span>
 				</span>
 				<MessageText text={turn.text} onMentionActivate={onMentionActivate} />
 			</p>

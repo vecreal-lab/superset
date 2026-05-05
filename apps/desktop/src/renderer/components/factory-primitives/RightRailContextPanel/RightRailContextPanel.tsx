@@ -27,6 +27,7 @@ export interface RightRailContextPanelProps {
 	onChatWithReference?: (reference: ArtifactReference) => void;
 	onAcceptHandoff?: (handoffId: string) => void;
 	onApproveGate?: (item: RightRailItem) => void;
+	onAcknowledgeItem?: (itemId: string) => void;
 }
 
 function groupItems(items: RightRailItem[], kind: RightRailItem["kind"]) {
@@ -62,16 +63,31 @@ const compactActionStyle: CSSProperties = {
 	overflowWrap: "anywhere",
 };
 
+function statusPillStyle(tone: "neutral" | "attention" | "success"): CSSProperties {
+	if (tone === "attention") {
+		return {
+			borderColor: "var(--accent)",
+			background: "var(--bg-soft)",
+			color: "var(--accent)",
+		};
+	}
+	if (tone === "success") {
+		return {
+			borderColor: "var(--success)",
+			background: "var(--bg-soft)",
+			color: "var(--success)",
+		};
+	}
+	return {};
+}
+
 function ProjectStatusStrip({ state }: { state: RightRailState }) {
 	const runningCount = groupItems(state.items, "running_work").length;
 	const approvalCount = groupItems(state.items, "pending_action").length;
 	const blockedCount = groupItems(state.items, "blocked_or_error").length;
+	const attentionCount = approvalCount + blockedCount;
 	const gateLabel =
-		blockedCount > 0
-			? `${blockedCount} needs attention`
-			: approvalCount > 0
-				? `${approvalCount} gate pending`
-				: "all gates green";
+		attentionCount > 0 ? `${attentionCount} needs attention` : "all gates green";
 
 	return (
 		<section
@@ -87,17 +103,33 @@ function ProjectStatusStrip({ state }: { state: RightRailState }) {
 		>
 			<h2 style={sectionHeadingStyle}>Project status</h2>
 			<div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-2)" }}>
-				<span className="factory-chip">{runningCount} WOs</span>
-				<span className="factory-chip">{approvalCount} approvals</span>
+				<span className="factory-chip" style={statusPillStyle("neutral")}>
+					{runningCount} WOs in flight
+				</span>
+				<span className="factory-chip" style={statusPillStyle("neutral")}>
+					{approvalCount} approvals
+				</span>
 				<span
 					className="factory-chip"
-					style={{ borderColor: "var(--success)", color: "var(--success)" }}
+					style={statusPillStyle(attentionCount > 0 ? "attention" : "success")}
 				>
 					{gateLabel}
 				</span>
 			</div>
 		</section>
 	);
+}
+
+function isStaleFoundationReview(item: RightRailItem, reference: ArtifactReference): boolean {
+	return Boolean(item.staleStateNotice && reference.kind === "foundation");
+}
+
+function referenceButtonLabel(
+	item: RightRailItem,
+	reference: ArtifactReference,
+): string {
+	if (isStaleFoundationReview(item, reference)) return `Review ${reference.label}`;
+	return reference.label;
 }
 
 function RightRailCard({
@@ -107,6 +139,7 @@ function RightRailCard({
 	onChatWithReference,
 	onAcceptHandoff,
 	onApproveGate,
+	onAcknowledgeItem,
 }: {
 	item: RightRailItem;
 	onExpandItem?: (itemId: string) => void;
@@ -114,6 +147,7 @@ function RightRailCard({
 	onChatWithReference?: (reference: ArtifactReference) => void;
 	onAcceptHandoff?: (handoffId: string) => void;
 	onApproveGate?: (item: RightRailItem) => void;
+	onAcknowledgeItem?: (itemId: string) => void;
 }) {
 	return (
 		<article
@@ -191,7 +225,27 @@ function RightRailCard({
 						</div>
 					) : null}
 					{item.staleStateNotice ? (
-						<StaleStateNotice notice={item.staleStateNotice} />
+						<div style={{ ...stackStyle, gap: "var(--sp-4)" }}>
+							<StaleStateNotice notice={item.staleStateNotice} />
+							<p style={{ margin: 0, lineHeight: 1.4, ...mutedTextStyle }}>
+								Review the change summary, then either keep this in the rail or mark it
+								reviewed.
+							</p>
+							<div style={{ display: "grid", gap: "var(--sp-3)" }}>
+								<PrimitiveButton
+									variant="secondary"
+									onClick={() => onAcknowledgeItem?.(item.itemId)}
+								>
+									Mark reviewed
+								</PrimitiveButton>
+								<PrimitiveButton
+									variant="ghost"
+									onClick={() => onExpandItem?.(item.itemId)}
+								>
+									Keep in rail
+								</PrimitiveButton>
+							</div>
+						</div>
 					) : null}
 					{item.handoff ? (
 						<HandoffCard handoff={item.handoff} onAccept={onAcceptHandoff} />
@@ -216,9 +270,20 @@ function RightRailCard({
 								style={compactActionStyle}
 								data-rail-target={reference.referenceId}
 								data-rail-target-kind={reference.kind}
-								onClick={() => onOpenReference?.(reference)}
+								aria-label={
+									isStaleFoundationReview(item, reference)
+										? `Review ${reference.label} foundation change`
+										: `Open ${reference.label}`
+								}
+								onClick={() => {
+									if (isStaleFoundationReview(item, reference)) {
+										if (!item.expanded) onExpandItem?.(item.itemId);
+										return;
+									}
+									onOpenReference?.(reference);
+								}}
 							>
-								{reference.label}
+								{referenceButtonLabel(item, reference)}
 							</button>
 							{onChatWithReference ? (
 								<button
@@ -251,6 +316,7 @@ export function RightRailContextPanel({
 	onChatWithReference,
 	onAcceptHandoff,
 	onApproveGate,
+	onAcknowledgeItem,
 }: RightRailContextPanelProps) {
 	const [dragging, setDragging] = useState(false);
 	const [startX, setStartX] = useState(0);
@@ -400,6 +466,7 @@ export function RightRailContextPanel({
 											onChatWithReference={onChatWithReference}
 											onAcceptHandoff={onAcceptHandoff}
 											onApproveGate={onApproveGate}
+											onAcknowledgeItem={onAcknowledgeItem}
 										/>
 									))}
 								</section>

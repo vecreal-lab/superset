@@ -445,18 +445,54 @@ function projectLineage(projectId: string, projects: FactoryRow[]): Set<string> 
 function foundationScopeForPath(relativePath: string): string | null {
 	const shared = /^projects\/_shared\/foundations\//.exec(relativePath);
 	if (shared) return "_shared";
-	const project = /^projects\/([^/]+)\/foundations\//.exec(relativePath);
+	const project = /^projects\/(.+)\/foundations\/[^/]+\.md$/.exec(relativePath);
 	return project?.[1] ?? null;
 }
 
-function foundationSignalItem(
+function projectScopeMatchesActiveProject(
+	scope: string,
+	projectId: string,
+	lineage: Set<string>,
+): boolean {
+	return (
+		scope === projectId ||
+		lineage.has(scope) ||
+		projectId.startsWith(`${scope}/`)
+	);
+}
+
+function parseCascadeRelevantMetadata(raw: string): boolean | null {
+	const frontmatter = raw.startsWith("---")
+		? /^---\r?\n([\s\S]*?)\r?\n---/.exec(raw)?.[1]
+		: raw.split(/\r?\n/).slice(0, 24).join("\n");
+	if (!frontmatter) return null;
+	const match = /^cascade_relevant:\s*(true|false)\s*$/im.exec(frontmatter);
+	if (!match) return null;
+	return match[1]?.toLowerCase() === "true";
+}
+
+async function sharedFoundationIsCascadeRelevant(row: FactoryRow): Promise<boolean> {
+	try {
+		const raw = await readFile(row.source_path, "utf8");
+		return parseCascadeRelevantMetadata(raw) === true;
+	} catch {
+		return false;
+	}
+}
+
+async function foundationSignalItem(
 	row: FactoryRow,
 	projectId: string,
 	lineage: Set<string>,
-): RightRailItem | null {
+): Promise<RightRailItem | null> {
 	const scope = foundationScopeForPath(row.source_relative_path);
-	if (!scope || !lineage.has(scope)) return null;
-	const parentOrShared = scope !== projectId;
+	if (!scope) return null;
+	if (scope === "_shared") {
+		if (!(await sharedFoundationIsCascadeRelevant(row))) return null;
+	} else if (!projectScopeMatchesActiveProject(scope, projectId, lineage)) {
+		return null;
+	}
+	const parentOrShared = scope === "_shared" || scope !== projectId;
 	const updatedAt = row.modified_at || nowIso();
 	return {
 		itemId: safeItemId("blocker-foundation-", `${scope}-${row.id}`),
@@ -737,7 +773,7 @@ export class CoordinatorBlockerHub {
 		}
 
 		for (const foundation of index.foundations) {
-			const item = foundationSignalItem(foundation, projectId, lineage);
+			const item = await foundationSignalItem(foundation, projectId, lineage);
 			if (item) items.push(item);
 		}
 
