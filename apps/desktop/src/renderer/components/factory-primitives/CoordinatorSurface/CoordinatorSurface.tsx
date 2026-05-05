@@ -2,6 +2,8 @@ import { Paperclip, Send } from "lucide-react";
 import { useEffect, useState, type ReactNode } from "react";
 import type {
 	ArtifactReference,
+	AuthorAttribution,
+	CoordinatorDialogueTurn,
 	CoordinatorSurfaceContext,
 	DialogueTurn,
 } from "lib/types/factory-operator-console";
@@ -10,9 +12,11 @@ import { EntityMentionLink } from "../EntityMentionLink";
 import { PrimitiveIcon, cx, mutedTextStyle, rowStyle, stackStyle } from "../common";
 import { ResearchAttachmentDropZone } from "./ResearchAttachmentDropZone";
 
+type CoordinatorSurfaceTurn = DialogueTurn | CoordinatorDialogueTurn;
+
 export interface CoordinatorSurfaceProps {
 	context: CoordinatorSurfaceContext;
-	turns: DialogueTurn[];
+	turns: CoordinatorSurfaceTurn[];
 	rightRail?: ReactNode;
 	inlineCards?: Record<string, ReactNode>;
 	draftComposerText?: string;
@@ -23,7 +27,8 @@ export interface CoordinatorSurfaceProps {
 	onMentionActivate?: (reference: ArtifactReference) => void;
 }
 
-function turnAuthor(turn: DialogueTurn) {
+function turnAuthor(turn: CoordinatorSurfaceTurn): AuthorAttribution {
+	if (typeof turn.author !== "string") return turn.author;
 	return {
 		user: turn.author,
 		role: turn.agentRole,
@@ -194,7 +199,7 @@ export function CoordinatorSurface({
 						</button>
 					</div>
 					<span style={{ ...mutedTextStyle, fontFamily: "var(--font-mono)" }}>
-						Coordinator runtime deferred to WO-C26.3-NEW; this surface renders the contract.
+						Project Coordinator runtime is active for this project.
 					</span>
 				</form>
 			</div>

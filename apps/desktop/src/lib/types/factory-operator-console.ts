@@ -286,6 +286,8 @@ export interface CoordinatorToolCall {
 	approval: CoordinatorToolApproval;
 	payload: Record<string, unknown>;
 	createsRightRailItem?: RightRailItemKind;
+	gate?: GateRequest;
+	createdAt: string;
 }
 
 export interface CoordinatorToolResult {

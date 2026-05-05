@@ -29,6 +29,7 @@ import {
 	plainEnglishError,
 	sanitizeForOperator,
 } from "./plain-english";
+import { coordinatorPersistence } from "./persistence";
 import { buildProjectCoordinatorPrompt } from "./prompt-loader";
 import { CliCoordinatorProvider, MockCoordinatorProvider } from "./providers/cli";
 import {
@@ -171,6 +172,37 @@ function upsertRightRailItem(
 	};
 }
 
+function mergeTurns(
+	persisted: CoordinatorDialogueTurn[],
+	memory: CoordinatorDialogueTurn[],
+): CoordinatorDialogueTurn[] {
+	const turnsById = new Map<string, CoordinatorDialogueTurn>();
+	for (const turn of persisted) turnsById.set(turn.turnId, turn);
+	for (const turn of memory) turnsById.set(turn.turnId, turn);
+	return [...turnsById.values()].sort((a, b) =>
+		a.createdAt.localeCompare(b.createdAt),
+	);
+}
+
+function mergeRightRailItemsById(
+	persisted: RightRailItem[],
+	memory: RightRailItem[],
+): RightRailItem[] {
+	const itemsById = new Map<string, RightRailItem>();
+	for (const item of persisted) itemsById.set(item.itemId, item);
+	for (const item of memory) itemsById.set(item.itemId, item);
+	return [...itemsById.values()].sort((a, b) => {
+		const priorityRank: Record<RightRailItem["priority"], number> = {
+			interrupting: 0,
+			proactive: 1,
+			ambient: 2,
+		};
+		const priority = priorityRank[a.priority] - priorityRank[b.priority];
+		if (priority !== 0) return priority;
+		return b.updatedAt.localeCompare(a.updatedAt);
+	});
+}
+
 export class CoordinatorRuntime {
 	private readonly states = new Map<string, CoordinatorProjectState>();
 	private readonly events = new EventEmitter();
@@ -196,6 +228,47 @@ export class CoordinatorRuntime {
 		this.states.set(projectId, state);
 		if (this.options.enableBlockerSubscriptions !== false) {
 			this.ensureBlockerSubscription(projectId);
+		}
+		return state;
+	}
+
+	private async hydrateProjectFromPersistence(
+		projectId: string,
+	): Promise<CoordinatorProjectState> {
+		const state = this.stateForProject(projectId);
+		try {
+			const snapshot = await coordinatorPersistence.loadProject(projectId);
+			const references = snapshot.references.map((reference) => ({
+				referenceId: reference.referenceId,
+				kind: reference.kind,
+				label: reference.label,
+				projectId: reference.projectId,
+				path: reference.path,
+				route: reference.route,
+				sourceSection: reference.sourceSection,
+				summary: reference.summary,
+			}));
+			state.history = mergeTurns(snapshot.messages, state.history);
+			state.context = {
+				...state.context,
+				historyPath: historyPathForProject(projectId),
+				rightRail: {
+					...snapshot.rightRailState,
+					projectId,
+					coordinatorRole: "PROJECT_COORDINATOR",
+					items: mergeRightRailItemsById(
+						snapshot.rightRailState.items,
+						state.context.rightRail.items,
+					),
+					collapsed: state.context.rightRail.collapsed,
+				},
+				currentReferences: references,
+			};
+		} catch (error) {
+			console.warn("[coordinator-runtime] persistence hydration failed", {
+				projectId,
+				error: error instanceof Error ? error.message : String(error),
+			});
 		}
 		return state;
 	}
@@ -254,6 +327,7 @@ export class CoordinatorRuntime {
 	}
 
 	async context(projectId: string): Promise<CoordinatorSurfaceContext> {
+		await this.hydrateProjectFromPersistence(projectId);
 		if (this.options.enableBlockerSubscriptions !== false) {
 			await this.reconcileBlockerItems(projectId, "context_load");
 		}
@@ -261,10 +335,11 @@ export class CoordinatorRuntime {
 	}
 
 	async history(projectId: string): Promise<CoordinatorDialogueTurn[]> {
-		return this.stateForProject(projectId).history;
+		return (await this.hydrateProjectFromPersistence(projectId)).history;
 	}
 
 	async rightRail(projectId: string): Promise<RightRailState> {
+		await this.hydrateProjectFromPersistence(projectId);
 		if (this.options.enableBlockerSubscriptions !== false) {
 			await this.reconcileBlockerItems(projectId, "context_load");
 		}
@@ -331,6 +406,10 @@ export class CoordinatorRuntime {
 				),
 			},
 		};
+		await coordinatorPersistence.writeRightRailState(
+			input.projectId,
+			state.context.rightRail,
+		);
 		this.emitRightRail(input.projectId);
 		return state.context.rightRail;
 	}
@@ -362,6 +441,42 @@ export class CoordinatorRuntime {
 		};
 		state.pendingTools.set(updated.toolCallId, updated);
 
+		const updatedRailItems = state.context.rightRail.items.map((item) =>
+			item.gate?.gateId === `gate-${updated.toolCallId}` ||
+			item.itemId === `rail-${updated.toolCallId}`
+				? {
+						...item,
+						kind: input.approved ? "recently_completed" : item.kind,
+						priority: input.approved ? "ambient" : item.priority,
+						summary: input.approved
+							? `${updated.kind} was approved by the operator.`
+							: `${updated.kind} was not approved.`,
+						updatedAt: nowIso(),
+					}
+				: item,
+		);
+		state.context = {
+			...state.context,
+			rightRail: {
+				...state.context.rightRail,
+				items: updatedRailItems,
+			},
+		};
+		await coordinatorPersistence.writeRightRailState(
+			input.projectId,
+			state.context.rightRail,
+		);
+		await coordinatorPersistence.appendEvent(input.projectId, {
+			type: "tool_call_decision",
+			payload: {
+				toolCallId: updated.toolCallId,
+				approved: input.approved,
+				decidedBy: input.decidedBy,
+				guidance: input.guidance,
+			},
+		});
+		this.emitRightRail(input.projectId);
+
 		const result: CoordinatorToolResult = {
 			toolCallId: updated.toolCallId,
 			status: input.approved ? "completed" : "canceled",
@@ -372,7 +487,12 @@ export class CoordinatorRuntime {
 			rightRailUpdates: [],
 		};
 
-		return filterToolResultForChat(result);
+		const filtered = filterToolResultForChat(result);
+		await coordinatorPersistence.appendEvent(input.projectId, {
+			type: "tool_result",
+			payload: filtered as unknown as Record<string, unknown>,
+		});
+		return filtered;
 	}
 
 	async sendTurn(input: CoordinatorSendTurnInput): Promise<CoordinatorStreamEvent[]> {
@@ -380,9 +500,13 @@ export class CoordinatorRuntime {
 		const emit = (event: CoordinatorStreamEvent) => {
 			emitted.push(event);
 			input.emit?.(event);
+			void coordinatorPersistence.appendEvent(input.projectId, {
+				type: event.type,
+				payload: event as unknown as Record<string, unknown>,
+			});
 		};
 
-		const state = this.stateForProject(input.projectId);
+		const state = await this.hydrateProjectFromPersistence(input.projectId);
 		const turnId = `turn-${randomUUID()}`;
 		const createdAt = nowIso();
 		const operatorAuthor = input.author ?? DEFAULT_OPERATOR_AUTHOR;
@@ -408,12 +532,10 @@ export class CoordinatorRuntime {
 			createdAt,
 		};
 		state.history.push(operatorTurn);
-		emit({
-			type: "message_persisted",
-			turnId,
-			messagePath: messagePathForProject(input.projectId),
-			message: operatorTurn,
-		});
+		await coordinatorPersistence.appendMessage(input.projectId, operatorTurn);
+		for (const reference of references) {
+			await coordinatorPersistence.appendReference(input.projectId, reference, turnId);
+		}
 
 		const toolKind = input.mockToolKind ?? inferToolKindFromMessage(input.message);
 		const toolCall = toolKind
@@ -436,6 +558,10 @@ export class CoordinatorRuntime {
 				...state.context,
 				rightRail: upsertRightRailItem(state.context.rightRail, rightRailItem),
 			};
+			await coordinatorPersistence.writeRightRailState(
+				input.projectId,
+				state.context.rightRail,
+			);
 			emit({ type: "tool_call_proposed", turnId, toolCall });
 			emit({
 				type: "right_rail_updated",
@@ -488,6 +614,7 @@ export class CoordinatorRuntime {
 				createdAt: nowIso(),
 			};
 			state.history.push(agentTurn);
+			await coordinatorPersistence.appendMessage(input.projectId, agentTurn);
 			emit({
 				type: "message_persisted",
 				turnId,

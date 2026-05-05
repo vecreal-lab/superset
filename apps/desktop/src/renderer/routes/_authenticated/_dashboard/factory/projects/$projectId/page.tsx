@@ -1,19 +1,44 @@
-import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, type ReactNode } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
+import {
+	useCallback,
+	useEffect,
+	useMemo,
+	useRef,
+	useState,
+	type ReactNode,
+} from "react";
 import {
 	CoordinatorSurface,
 	RightRailContextPanel,
 } from "renderer/components/factory-primitives";
+import { env } from "renderer/env.renderer";
+import {
+	activateEntityMention,
+	chatWithProjectCoordinator,
+	consumeChatWithProjectCoordinatorPayload,
+	mergeRightRailItems,
+	preloadComposerReference,
+	type FactoryCoordinatorNavigate,
+} from "renderer/lib/factory-coordinator/chat-with-pc";
+import { electronTrpc, type ElectronRouterOutputs } from "renderer/lib/electron-trpc";
 import { electronTrpcClient as trpcClient } from "renderer/lib/trpc-client";
 import { useSetActiveProjectId } from "renderer/stores/active-project";
+import {
+	useCoordinatorActiveRightRailItemId,
+	useCoordinatorPreloadedComposerReference,
+	useCoordinatorSurfaceStore,
+} from "lib/stores/coordinator-surface";
+import { useFactoryWorkspaceStore } from "lib/stores/workspace";
 import type {
 	ArtifactReference,
+	AuthorAttribution,
+	CoordinatorDialogueTurn,
+	CoordinatorMode,
 	CoordinatorSurfaceContext,
-	DialogueTurn,
+	CoordinatorToolCall,
 	RightRailItem,
 	RightRailState,
 } from "lib/types/factory-operator-console";
-import type { ElectronRouterOutputs } from "renderer/lib/electron-trpc";
 import {
 	formatDate,
 	rowMatchesProject,
@@ -28,6 +53,43 @@ export const Route = createFileRoute(
 });
 
 type PendingApproval = ElectronRouterOutputs["factory"]["pendingApprovals"][number];
+type CoordinatorRecentActivity =
+	ElectronRouterOutputs["factory"]["coordinator"]["recentActivity"];
+
+type CoordinatorStreamEvent =
+	| {
+			type: "turn_started";
+			turnId: string;
+			context: CoordinatorSurfaceContext;
+	  }
+	| { type: "chunk"; turnId: string; text: string }
+	| {
+			type: "tool_call_proposed";
+			turnId: string;
+			toolCall: CoordinatorToolCall;
+	  }
+	| {
+			type: "right_rail_updated";
+			projectId: string;
+			rightRail: RightRailState;
+	  }
+	| {
+			type: "message_persisted";
+			turnId: string;
+			messagePath: string;
+			message: CoordinatorDialogueTurn;
+	  }
+	| {
+			type: "complete";
+			turnId: string;
+			context: CoordinatorSurfaceContext;
+	  }
+	| {
+			type: "error";
+			turnId: string;
+			plainEnglishSummary: string;
+			detailsRef?: ArtifactReference;
+	  };
 
 interface ProjectCoordinatorRouteData {
 	projectId: string;
@@ -35,7 +97,19 @@ interface ProjectCoordinatorRouteData {
 	workOrders: FactoryRow[];
 	runs: FactoryRow[];
 	pendingApprovals: PendingApproval[];
-	loadError?: string;
+	coordinatorContext?: CoordinatorSurfaceContext;
+	coordinatorHistory: CoordinatorDialogueTurn[];
+	coordinatorRightRail?: RightRailState;
+	coordinatorRecentActivity: CoordinatorRecentActivity;
+	loadErrors: string[];
+}
+
+interface PendingTurn {
+	key: string;
+	message: string;
+	references: ArtifactReference[];
+	activeMode: CoordinatorMode;
+	mockResponse?: string;
 }
 
 const ACTIVE_WORK_ORDER_STATES = new Set([
@@ -49,29 +123,113 @@ const ACTIVE_WORK_ORDER_STATES = new Set([
 	"failed",
 ]);
 
+const OPERATOR_AUTHOR: AuthorAttribution = {
+	user: "yuriy",
+	isAgent: false,
+	displayName: "Yuriy",
+};
+const EMPTY_RIGHT_RAIL_ITEMS: RightRailItem[] = [];
+
+function localOnlyMockResponse(message: string): string | undefined {
+	if (env.FACTORY_LOCAL_ONLY !== "true") return undefined;
+	if (/spawn|run|approve|handoff|blocker/i.test(message)) {
+		return "I found a high-stakes action in that request, so I prepared it for operator approval instead of running it directly.";
+	}
+	return "The project is active. I see current work orders, recent run evidence, and right-rail context loaded for this coordinator surface.";
+}
+
+async function guarded<T>(
+	label: string,
+	promise: Promise<T>,
+	fallback: T,
+	errors: string[],
+): Promise<T> {
+	try {
+		return await promise;
+	} catch (error) {
+		errors.push(
+			`${label}: ${error instanceof Error ? error.message : String(error)}`,
+		);
+		return fallback;
+	}
+}
+
 async function loadProjectCoordinatorRoute(
 	projectId: string,
 ): Promise<ProjectCoordinatorRouteData> {
-	try {
-		const [projects, workOrders, runs, pendingApprovals] = await Promise.all([
+	const loadErrors: string[] = [];
+	const [
+		projects,
+		workOrders,
+		runs,
+		pendingApprovals,
+		coordinatorContext,
+		coordinatorHistory,
+		coordinatorRightRail,
+		coordinatorRecentActivity,
+	] = await Promise.all([
+		guarded(
+			"factory.dataset(projects)",
 			trpcClient.factory.dataset.query({ dataset: "projects" }),
+			[],
+			loadErrors,
+		),
+		guarded(
+			"factory.dataset(work_orders)",
 			trpcClient.factory.dataset.query({ dataset: "work_orders" }),
+			[],
+			loadErrors,
+		),
+		guarded(
+			"factory.dataset(runs)",
 			trpcClient.factory.dataset.query({ dataset: "runs" }),
+			[],
+			loadErrors,
+		),
+		guarded(
+			"factory.pendingApprovals",
 			trpcClient.factory.pendingApprovals.query(),
-		]);
+			[],
+			loadErrors,
+		),
+		guarded<CoordinatorSurfaceContext | undefined>(
+			"factory.coordinator.context",
+			trpcClient.factory.coordinator.context.query({ projectId }),
+			undefined,
+			loadErrors,
+		),
+		guarded<CoordinatorDialogueTurn[]>(
+			"factory.coordinator.history",
+			trpcClient.factory.coordinator.history.query({ projectId }),
+			[],
+			loadErrors,
+		),
+		guarded<RightRailState | undefined>(
+			"factory.coordinator.rightRail",
+			trpcClient.factory.coordinator.rightRail.query({ projectId }),
+			undefined,
+			loadErrors,
+		),
+		guarded<CoordinatorRecentActivity>(
+			"factory.coordinator.recentActivity",
+			trpcClient.factory.coordinator.recentActivity.query({ projectId }),
+			[],
+			loadErrors,
+		),
+	]);
 
-		return { projectId, projects, workOrders, runs, pendingApprovals };
-	} catch (error) {
-		const loadError = error instanceof Error ? error.message : "Unknown load error";
-		return {
-			projectId,
-			projects: [],
-			workOrders: [],
-			runs: [],
-			pendingApprovals: [],
-			loadError,
-		};
-	}
+	return {
+		projectId,
+		projects,
+		workOrders,
+		runs,
+		pendingApprovals,
+		coordinatorContext,
+		coordinatorHistory,
+		coordinatorRightRail,
+		coordinatorRecentActivity,
+		loadErrors,
+	};
 }
 
 function dataText(row: FactoryRow | null | undefined, key: string): string | null {
@@ -131,30 +289,58 @@ function sortRecentRows(rows: FactoryRow[]): FactoryRow[] {
 	});
 }
 
+function upsertTurn(
+	turns: CoordinatorDialogueTurn[],
+	turn: CoordinatorDialogueTurn,
+): CoordinatorDialogueTurn[] {
+	if (turns.some((entry) => entry.turnId === turn.turnId)) {
+		return turns.map((entry) => (entry.turnId === turn.turnId ? turn : entry));
+	}
+	return [...turns, turn].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+function rightRailItemsSignature(items: RightRailItem[]): string {
+	return items
+		.map(
+			(item) =>
+				`${item.itemId}:${item.kind}:${item.priority}:${item.updatedAt}:${item.expanded ? "1" : "0"}`,
+		)
+		.join("|");
+}
+
+function sameRightRailState(a: RightRailState, b: RightRailState): boolean {
+	return (
+		a.projectId === b.projectId &&
+		a.activeItemId === b.activeItemId &&
+		a.collapsed === b.collapsed &&
+		rightRailItemsSignature(a.items) === rightRailItemsSignature(b.items)
+	);
+}
+
 function buildRightRailState({
 	projectId,
 	project,
 	activeWorkOrders,
 	recentRuns,
 	pendingApprovals,
-	loadError,
+	loadErrors,
 }: {
 	projectId: string;
 	project?: FactoryRow;
 	activeWorkOrders: FactoryRow[];
 	recentRuns: FactoryRow[];
 	pendingApprovals: PendingApproval[];
-	loadError?: string;
+	loadErrors: string[];
 }): RightRailState {
 	const updatedAt = new Date().toISOString();
 	const items: RightRailItem[] = [];
 
-	if (loadError) {
+	if (loadErrors.length > 0) {
 		items.push({
-			itemId: "stream-a-load-error",
+			itemId: "integration-load-errors",
 			kind: "blocked_or_error",
 			title: "Read-model load issue",
-			summary: loadError,
+			summary: loadErrors.join(" | "),
 			priority: "interrupting",
 			references: [],
 			updatedAt,
@@ -163,13 +349,13 @@ function buildRightRailState({
 	}
 
 	items.push({
-		itemId: "stream-a-project-context",
+		itemId: "project-context",
 		kind: "reference",
 		title: project?.title || projectId,
 		summary:
 			dataText(project, "identity_summary") ||
 			dataText(project, "summary") ||
-			"Project metadata loaded from factory.dataset('projects').",
+			"Project metadata loaded from factory read models.",
 		priority: "ambient",
 		references: [projectReference(project, projectId)],
 		updatedAt,
@@ -233,20 +419,6 @@ function buildRightRailState({
 		});
 	}
 
-	if (items.length === 1) {
-		items.push({
-			itemId: "stream-bc-contract-gap",
-			kind: "reference",
-			title: "Coordinator runtime pending",
-			summary:
-				"Stream A renders the shell and route; Streams B and C will replace stubs with coordinator context, history, and durable rail state.",
-			priority: "ambient",
-			references: [],
-			updatedAt,
-			expanded: true,
-		});
-	}
-
 	return {
 		projectId,
 		coordinatorRole: "PROJECT_COORDINATOR",
@@ -257,9 +429,106 @@ function buildRightRailState({
 	};
 }
 
+function fallbackContext(
+	projectId: string,
+	project: FactoryRow | undefined,
+	rightRail: RightRailState,
+): CoordinatorSurfaceContext {
+	return {
+		projectId,
+		coordinatorRole: "PROJECT_COORDINATOR",
+		activeMode: "general",
+		activeDialogueId: `coordinator-${projectId}`,
+		historyPath: `runs/dialogues/${projectId}/coordinator/`,
+		rightRail,
+		currentReferences: [projectReference(project, projectId)],
+	};
+}
+
+function CoordinatorTurnSubscription({
+	turn,
+	projectId,
+	onEvent,
+	onError,
+}: {
+	turn: PendingTurn;
+	projectId: string;
+	onEvent: (event: CoordinatorStreamEvent) => void;
+	onError: (error: unknown) => void;
+}) {
+	electronTrpc.factory.coordinator.sendTurn.useSubscription(
+		{
+			projectId,
+			message: turn.message,
+			author: OPERATOR_AUTHOR,
+			references: turn.references,
+			activeMode: turn.activeMode,
+			mockResponse: turn.mockResponse,
+		},
+		{
+			onData: (event) => onEvent(event as CoordinatorStreamEvent),
+			onError,
+		},
+	);
+	return null;
+}
+
 function ProjectCoordinatorPage() {
 	const routeData = Route.useLoaderData();
+	const navigate = useNavigate();
 	const setActiveProjectId = useSetActiveProjectId();
+	const utils = electronTrpc.useUtils();
+	const rightRailCollapsed = useFactoryWorkspaceStore(
+		(state) => state.rightRailCollapsed,
+	);
+	const rightRailWidthPx = useFactoryWorkspaceStore(
+		(state) => state.rightRailWidthPx,
+	);
+	const setRightRailCollapsed = useFactoryWorkspaceStore(
+		(state) => state.setRightRailCollapsed,
+	);
+	const setRightRailWidthPx = useFactoryWorkspaceStore(
+		(state) => state.setRightRailWidthPx,
+	);
+	const setRightRailItems = useCoordinatorSurfaceStore(
+		(state) => state.setRightRailItems,
+	);
+	const setActiveRightRailItemId = useCoordinatorSurfaceStore(
+		(state) => state.setActiveRightRailItemId,
+	);
+	const setCurrentReferences = useCoordinatorSurfaceStore(
+		(state) => state.setCurrentReferences,
+	);
+	const setStreamingTurnId = useCoordinatorSurfaceStore(
+		(state) => state.setStreamingTurnId,
+	);
+	const upsertPendingToolCall = useCoordinatorSurfaceStore(
+		(state) => state.upsertPendingToolCall,
+	);
+	const setPreloadedComposerReference = useCoordinatorSurfaceStore(
+		(state) => state.setPreloadedComposerReference,
+	);
+	const rightRailItems = useCoordinatorSurfaceStore(
+		(state) =>
+			state.rightRailItemsByProject[routeData.projectId] ??
+			EMPTY_RIGHT_RAIL_ITEMS,
+	);
+	const activeRightRailItemId = useCoordinatorActiveRightRailItemId(
+		routeData.projectId,
+	);
+	const preloadedComposerReference = useCoordinatorPreloadedComposerReference(
+		routeData.projectId,
+	);
+	const draftComposerText = useFactoryWorkspaceStore(
+		(state) => state.draftComposerTextByProject[routeData.projectId] ?? "",
+	);
+	const setDraftComposerText = useFactoryWorkspaceStore(
+		(state) => state.setDraftComposerText,
+	);
+	const activeCoordinatorMode = useFactoryWorkspaceStore(
+		(state) => state.activeCoordinatorMode,
+	);
+	const approveToolCall = electronTrpc.factory.coordinator.approveToolCall.useMutation();
 
 	useEffect(() => {
 		setActiveProjectId(routeData.projectId);
@@ -305,8 +574,7 @@ function ProjectCoordinatorPage() {
 		);
 	}, [routeData.pendingApprovals, routeData.projectId, routeData.workOrders]);
 
-	// TODO(C26.3 Stream B): Replace this stub with factory.coordinator.context({ projectId }).
-	const rightRailState = useMemo(
+	const fallbackRightRailState = useMemo(
 		() =>
 			buildRightRailState({
 				projectId: routeData.projectId,
@@ -314,60 +582,413 @@ function ProjectCoordinatorPage() {
 				activeWorkOrders,
 				recentRuns,
 				pendingApprovals: projectPendingApprovals,
-				loadError: routeData.loadError,
+				loadErrors: routeData.loadErrors,
 			}),
 		[
 			activeWorkOrders,
 			project,
 			projectPendingApprovals,
 			recentRuns,
-			routeData.loadError,
+			routeData.loadErrors,
 			routeData.projectId,
 		],
 	);
+	const initialRightRail = routeData.coordinatorRightRail ?? fallbackRightRailState;
+	const initialContext =
+		routeData.coordinatorContext ??
+		fallbackContext(routeData.projectId, project, initialRightRail);
+	const [coordinatorContext, setCoordinatorContext] =
+		useState<CoordinatorSurfaceContext>(initialContext);
+	const [baseRightRailState, setBaseRightRailState] =
+		useState<RightRailState>(initialRightRail);
+	const [turns, setTurns] = useState<CoordinatorDialogueTurn[]>(
+		routeData.coordinatorHistory,
+	);
+	const [streamingTurn, setStreamingTurn] =
+		useState<CoordinatorDialogueTurn | null>(null);
+	const [pendingTurn, setPendingTurn] = useState<PendingTurn | null>(null);
 
-	// TODO(C26.3 Stream B): Replace with coordinator runtime context.
-	const coordinatorContext: CoordinatorSurfaceContext = useMemo(
+	useEffect(() => {
+		const nextRightRail = routeData.coordinatorRightRail ?? fallbackRightRailState;
+		const nextContext =
+			routeData.coordinatorContext ??
+			fallbackContext(routeData.projectId, project, nextRightRail);
+		setBaseRightRailState(nextRightRail);
+		setCoordinatorContext(nextContext);
+		setTurns(routeData.coordinatorHistory);
+		setRightRailItems(routeData.projectId, nextRightRail.items);
+		setActiveRightRailItemId(
+			routeData.projectId,
+			nextRightRail.activeItemId ?? null,
+		);
+		setCurrentReferences(routeData.projectId, nextContext.currentReferences);
+	}, [
+		fallbackRightRailState,
+		project,
+		routeData.coordinatorContext,
+		routeData.coordinatorHistory,
+		routeData.coordinatorRightRail,
+		routeData.projectId,
+		setActiveRightRailItemId,
+		setCurrentReferences,
+		setRightRailItems,
+	]);
+
+	useEffect(() => {
+		const payload = consumeChatWithProjectCoordinatorPayload(routeData.projectId);
+		if (!payload) return;
+		preloadComposerReference(routeData.projectId, payload.reference);
+		setDraftComposerText(routeData.projectId, payload.suggestedPrompt ?? "");
+	}, [routeData.projectId, setDraftComposerText]);
+
+	const liveRightRailItems =
+		rightRailItems.length > 0 ? rightRailItems : baseRightRailState.items;
+	const liveRightRailState: RightRailState = useMemo(
 		() => ({
-			projectId: routeData.projectId,
-			coordinatorRole: "PROJECT_COORDINATOR",
-			activeMode: "general",
-			activeDialogueId: `${routeData.projectId}-coordinator-stream-a`,
-			historyPath: `runs/dialogues/${routeData.projectId}/coordinator/messages.jsonl`,
-			rightRail: rightRailState,
-			currentReferences: [projectReference(project, routeData.projectId)],
+			...baseRightRailState,
+			activeItemId: activeRightRailItemId ?? baseRightRailState.activeItemId,
+			items: liveRightRailItems,
+			collapsed: rightRailCollapsed,
 		}),
-		[project, rightRailState, routeData.projectId],
+		[
+			activeRightRailItemId,
+			baseRightRailState,
+			liveRightRailItems,
+			rightRailCollapsed,
+		],
+	);
+	const liveRightRailStateRef = useRef(liveRightRailState);
+
+	useEffect(() => {
+		liveRightRailStateRef.current = liveRightRailState;
+	}, [liveRightRailState]);
+
+	const commitRightRailState = useCallback(
+		(nextState: RightRailState) => {
+			setBaseRightRailState((previous) =>
+				sameRightRailState(previous, nextState) ? previous : nextState,
+			);
+			const storeState = useCoordinatorSurfaceStore.getState();
+			const currentItems =
+				storeState.rightRailItemsByProject[routeData.projectId] ?? [];
+			if (rightRailItemsSignature(currentItems) !== rightRailItemsSignature(nextState.items)) {
+				setRightRailItems(routeData.projectId, nextState.items);
+			}
+			const currentActiveItem =
+				storeState.activeRightRailItemIdByProject[routeData.projectId] ?? null;
+			const nextActiveItem = nextState.activeItemId ?? null;
+			if (currentActiveItem !== nextActiveItem) {
+				setActiveRightRailItemId(routeData.projectId, nextActiveItem);
+			}
+		},
+		[routeData.projectId, setActiveRightRailItemId, setRightRailItems],
 	);
 
-	// TODO(C26.3 Stream C): Hydrate turns from coordinator persistence.
-	const turns: DialogueTurn[] = [];
-	// TODO(C26.3 Stream B+C): Inline cards will be generated from stream events and persisted tool calls.
-	const inlineCards: Record<string, ReactNode> = {};
-	// TODO(C26.3 Stream B): Wire to factory.coordinator.sendTurn observable subscription.
-	const sendCoordinatorTurn = (_message: string) => undefined;
-	// TODO(C26.3 Stream C): Wire attachments to coordinator references and draft composer state.
-	const attachReference = () => undefined;
+	const coordinatorSubscriptionInput = useMemo(
+		() => ({ projectId: routeData.projectId }),
+		[routeData.projectId],
+	);
+	const handleRightRailSubscription = useCallback(
+		(state: RightRailState) => commitRightRailState(state),
+		[commitRightRailState],
+	);
+	const handleBlockerSubscription = useCallback(
+		(items: RightRailItem[]) => {
+			const current = liveRightRailStateRef.current;
+			commitRightRailState({
+				...current,
+				items: mergeRightRailItems(current.items, items),
+			});
+		},
+		[commitRightRailState],
+	);
+	const rightRailSubscriptionOptions = useMemo(
+		() => ({ onData: handleRightRailSubscription }),
+		[handleRightRailSubscription],
+	);
+	const blockerSubscriptionOptions = useMemo(
+		() => ({ onData: handleBlockerSubscription }),
+		[handleBlockerSubscription],
+	);
 
+	electronTrpc.factory.coordinator.subscribeBlockers.useSubscription(
+		coordinatorSubscriptionInput,
+		blockerSubscriptionOptions,
+	);
+
+	electronTrpc.factory.coordinator.subscribeRightRail.useSubscription(
+		coordinatorSubscriptionInput,
+		rightRailSubscriptionOptions,
+	);
+
+	const navigateToCoordinator = useCallback<FactoryCoordinatorNavigate>(
+		(input) => {
+			void navigate(input);
+		},
+		[navigate],
+	);
+
+	const activateReference = useCallback(
+		(reference: ArtifactReference) => {
+			activateEntityMention({
+				projectId: routeData.projectId,
+				reference,
+				rightRailState: liveRightRailState,
+				commitRightRailState,
+			});
+		},
+		[commitRightRailState, liveRightRailState, routeData.projectId],
+	);
+
+	const chatAboutReference = useCallback(
+		(reference: ArtifactReference) => {
+			chatWithProjectCoordinator(
+				{
+					projectId: routeData.projectId,
+					reference,
+					suggestedPrompt: `Let's look at ${reference.label}.`,
+					sourceRoute:
+						typeof window !== "undefined" ? window.location.pathname : undefined,
+				},
+				navigateToCoordinator,
+			);
+		},
+		[navigateToCoordinator, routeData.projectId],
+	);
+
+	const toggleRailItem = useCallback(
+		(itemId: string) => {
+			const nextItems = liveRightRailState.items.map((item) =>
+				item.itemId === itemId ? { ...item, expanded: !item.expanded } : item,
+			);
+			commitRightRailState({
+				...liveRightRailState,
+				activeItemId: itemId,
+				items: nextItems,
+			});
+		},
+		[commitRightRailState, liveRightRailState],
+	);
+
+	const approveRailGate = useCallback(
+		(item: RightRailItem) => {
+			const toolCallId =
+				item.gate?.gateId.replace(/^gate-/, "") ||
+				item.itemId.replace(/^rail-/, "");
+			if (!toolCallId) return;
+			approveToolCall.mutate({
+				projectId: routeData.projectId,
+				toolCallId,
+				approved: true,
+				decidedBy: OPERATOR_AUTHOR,
+			});
+		},
+		[approveToolCall, routeData.projectId],
+	);
+
+	const composerReferences = useMemo(() => {
+		if (preloadedComposerReference) return [preloadedComposerReference];
+		return coordinatorContext.currentReferences.length > 0
+			? coordinatorContext.currentReferences
+			: [projectReference(project, routeData.projectId)];
+	}, [coordinatorContext.currentReferences, preloadedComposerReference, project, routeData.projectId]);
+
+	const attachReference = useCallback(() => {
+		const reference = projectReference(project, routeData.projectId);
+		setPreloadedComposerReference(routeData.projectId, reference);
+		setCurrentReferences(routeData.projectId, [reference]);
+	}, [
+		project,
+		routeData.projectId,
+		setCurrentReferences,
+		setPreloadedComposerReference,
+	]);
+
+	const handleSend = useCallback(
+		(message: string) => {
+			if (pendingTurn) return;
+			const createdAt = new Date().toISOString();
+			const key = `${createdAt}-${Math.random().toString(16).slice(2)}`;
+			const references = composerReferences;
+			const operatorTurn: CoordinatorDialogueTurn = {
+				turnId: `operator-${key}`,
+				role: "operator",
+				author: OPERATOR_AUTHOR,
+				text: message,
+				references,
+				createdAt,
+			};
+			setTurns((previous) => upsertTurn(previous, operatorTurn));
+			setPendingTurn({
+				key,
+				message,
+				references,
+				activeMode: activeCoordinatorMode,
+				mockResponse: localOnlyMockResponse(message),
+			});
+			setDraftComposerText(routeData.projectId, "");
+			setStreamingTurnId(routeData.projectId, operatorTurn.turnId);
+		},
+		[
+			activeCoordinatorMode,
+			composerReferences,
+			pendingTurn,
+			routeData.projectId,
+			setDraftComposerText,
+			setStreamingTurnId,
+		],
+	);
+
+	const handleStreamEvent = useCallback(
+		(event: CoordinatorStreamEvent) => {
+			if (event.type === "turn_started") {
+				setCoordinatorContext(event.context);
+				setStreamingTurnId(routeData.projectId, event.turnId);
+				return;
+			}
+			if (event.type === "chunk") {
+				const createdAt = new Date().toISOString();
+				setStreamingTurn((previous) => ({
+					turnId: `${event.turnId}-streaming-agent`,
+					role: "agent",
+					author: {
+						user: "PROJECT_COORDINATOR",
+						role: "PROJECT_COORDINATOR",
+						isAgent: true,
+						displayName: "PROJECT_COORDINATOR",
+					},
+					agentRole: "PROJECT_COORDINATOR",
+					text:
+						previous?.turnId === `${event.turnId}-streaming-agent`
+							? `${previous.text}${event.text}`
+							: event.text,
+					references: composerReferences,
+					createdAt: previous?.createdAt ?? createdAt,
+				}));
+				return;
+			}
+			if (event.type === "tool_call_proposed") {
+				upsertPendingToolCall(routeData.projectId, event.toolCall);
+				return;
+			}
+			if (event.type === "right_rail_updated") {
+				commitRightRailState(event.rightRail);
+				return;
+			}
+			if (event.type === "message_persisted") {
+				setTurns((previous) => upsertTurn(previous, event.message));
+				setStreamingTurn(null);
+				return;
+			}
+			if (event.type === "complete") {
+				setCoordinatorContext(event.context);
+				setPendingTurn(null);
+				setStreamingTurn(null);
+				setStreamingTurnId(routeData.projectId, null);
+				void utils.factory.coordinator.history.invalidate({ projectId: routeData.projectId });
+				void utils.factory.coordinator.rightRail.invalidate({ projectId: routeData.projectId });
+				return;
+			}
+			if (event.type === "error") {
+				setTurns((previous) =>
+					upsertTurn(previous, {
+						turnId: `error-${event.turnId}`,
+						role: "system",
+						author: {
+							user: "factory",
+							isAgent: false,
+							displayName: "Factory",
+						},
+						text: event.plainEnglishSummary,
+						references: event.detailsRef ? [event.detailsRef] : [],
+						createdAt: new Date().toISOString(),
+					}),
+				);
+				setPendingTurn(null);
+				setStreamingTurn(null);
+				setStreamingTurnId(routeData.projectId, null);
+			}
+		},
+		[
+			commitRightRailState,
+			composerReferences,
+			routeData.projectId,
+			setStreamingTurnId,
+			upsertPendingToolCall,
+			utils.factory.coordinator.history,
+			utils.factory.coordinator.rightRail,
+		],
+	);
+
+	const handleStreamError = useCallback(
+		(error: unknown) => {
+			const message = error instanceof Error ? error.message : String(error);
+			setTurns((previous) =>
+				upsertTurn(previous, {
+					turnId: `error-${Date.now()}`,
+					role: "system",
+					author: { user: "factory", isAgent: false, displayName: "Factory" },
+					text: message,
+					references: [],
+					createdAt: new Date().toISOString(),
+				}),
+			);
+			setPendingTurn(null);
+			setStreamingTurn(null);
+			setStreamingTurnId(routeData.projectId, null);
+		},
+		[routeData.projectId, setStreamingTurnId],
+	);
+
+	const displayedTurns = useMemo(() => {
+		if (!streamingTurn) return turns;
+		if (turns.some((turn) => turn.turnId === streamingTurn.turnId)) return turns;
+		return [...turns, streamingTurn];
+	}, [streamingTurn, turns]);
+
+	const inlineCards: Record<string, ReactNode> = {};
 	const rightRail = (
 		<RightRailContextPanel
-			state={rightRailState}
-			onCollapse={() => undefined}
-			onExpandItem={() => undefined}
-			onOpenReference={() => undefined}
+			state={liveRightRailState}
+			widthPx={rightRailWidthPx}
+			onWidthChange={setRightRailWidthPx}
+			onCollapse={() => setRightRailCollapsed(!rightRailCollapsed)}
+			onExpandItem={toggleRailItem}
+			onOpenReference={activateReference}
+			onChatWithReference={chatAboutReference}
+			onApproveGate={approveRailGate}
 		/>
 	);
 
 	return (
 		<div className="h-full min-h-0 w-full overflow-hidden" data-factory-project-route>
 			<CoordinatorSurface
-				context={coordinatorContext}
-				turns={turns}
+				context={{
+					...coordinatorContext,
+					activeMode: activeCoordinatorMode,
+					rightRail: liveRightRailState,
+					currentReferences: composerReferences,
+				}}
+				turns={displayedTurns}
 				rightRail={rightRail}
 				inlineCards={inlineCards}
-				onSend={sendCoordinatorTurn}
+				draftComposerText={draftComposerText}
+				composerReferences={composerReferences}
+				onSend={handleSend}
 				onAttach={attachReference}
+				onDraftChange={(nextDraft) =>
+					setDraftComposerText(routeData.projectId, nextDraft)
+				}
+				onMentionActivate={activateReference}
 			/>
+			{pendingTurn && (
+				<CoordinatorTurnSubscription
+					turn={pendingTurn}
+					projectId={routeData.projectId}
+					onEvent={handleStreamEvent}
+					onError={handleStreamError}
+				/>
+			)}
 		</div>
 	);
 }
