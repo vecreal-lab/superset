@@ -136,12 +136,37 @@ function dialogueStateForStatus(state?: string): LDPStatusSummary["state"] {
 	return (state as LDPStatusSummary["state"] | undefined) || "idle";
 }
 
+function toLDPAuthorAttribution(
+	author: LDPAuthorAttribution | string | undefined,
+	message: {
+		kind: LDPDialogueTurn["kind"];
+		speaker: string;
+		role_id?: string;
+	},
+): LDPAuthorAttribution | undefined {
+	if (author && typeof author === "object") {
+		return {
+			...author,
+			role: author.role || message.role_id,
+			displayName: author.displayName || message.speaker,
+		};
+	}
+	if (typeof author !== "string") return undefined;
+	const isAgent = message.kind !== "operator";
+	return {
+		user: author,
+		role: message.role_id || (isAgent ? message.speaker : undefined),
+		isAgent,
+		displayName: isAgent ? message.role_id || message.speaker : message.speaker,
+	};
+}
+
 function mapTurns(messages: Array<{
 	id: string;
 	kind: LDPDialogueTurn["kind"];
 	speaker: string;
 	role_id?: string;
-	author?: LDPAuthorAttribution;
+	author?: LDPAuthorAttribution | string;
 	content: string;
 	created_at: string;
 }>): LDPDialogueTurn[] {
@@ -150,7 +175,7 @@ function mapTurns(messages: Array<{
 		kind: message.kind,
 		speaker: message.speaker,
 		roleId: message.role_id,
-		author: message.author,
+		author: toLDPAuthorAttribution(message.author, message),
 		content: message.content,
 		timestamp: message.created_at,
 	}));

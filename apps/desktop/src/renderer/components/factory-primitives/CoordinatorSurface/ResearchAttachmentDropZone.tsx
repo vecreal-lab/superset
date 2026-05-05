@@ -7,12 +7,14 @@ export interface ResearchAttachmentDropZoneProps {
 	references?: ArtifactReference[];
 	disabled?: boolean;
 	onFilesSelected?: (files: File[]) => void;
+	onReferenceActivate?: (reference: ArtifactReference) => void;
 }
 
 export function ResearchAttachmentDropZone({
 	references = [],
 	disabled,
 	onFilesSelected,
+	onReferenceActivate,
 }: ResearchAttachmentDropZoneProps) {
 	return (
 		<label
@@ -42,7 +44,11 @@ export function ResearchAttachmentDropZone({
 			{references.length > 0 && (
 				<span style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-3)" }}>
 					{references.map((reference) => (
-						<EntityMentionLink key={reference.referenceId} reference={reference} />
+						<EntityMentionLink
+							key={reference.referenceId}
+							reference={reference}
+							onActivate={onReferenceActivate}
+						/>
 					))}
 				</span>
 			)}

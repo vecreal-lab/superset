@@ -48,7 +48,14 @@ export interface WorkOrderListItem {
 	author: AuthorAttribution;
 	assignedTo: AuthorAttribution;
 	projectId: string;
-	scope: "infrastructure" | "product" | "brand" | "docs" | "cleanup" | "other";
+	scope:
+		| "infrastructure"
+		| "product"
+		| "brand"
+		| "docs"
+		| "cleanup"
+		| "dashboard"
+		| "other";
 	state: WorkOrderRunState;
 	blockedBy?: string[];
 	lastActivityAt: string;
@@ -244,6 +251,95 @@ export interface DialogueTurn {
 	attachedMockups?: MockupBundle;
 	attachedGate?: GateRequest;
 	timestamp: string;
+}
+
+export type CoordinatorToolKind =
+	| "spawn_wo"
+	| "run_wo"
+	| "approve_gate"
+	| "dispatch_subagent"
+	| "generate_handoff"
+	| "resolve_blocker"
+	| "surface_reference"
+	| "render_pipeline_strip"
+	| "update_right_rail_item"
+	| "start_research_intake"
+	| "record_decision"
+	| "capture_lesson_candidate";
+
+export type CoordinatorToolRisk = "low" | "medium" | "high";
+
+export type CoordinatorToolApproval =
+	| "auto_allowed"
+	| "operator_required"
+	| "operator_approved"
+	| "operator_rejected";
+
+export interface CoordinatorToolCall {
+	toolCallId: string;
+	kind: CoordinatorToolKind;
+	projectId: string;
+	requestedBy: AuthorAttribution;
+	rationale: string;
+	references: ArtifactReference[];
+	risk: CoordinatorToolRisk;
+	approval: CoordinatorToolApproval;
+	payload: Record<string, unknown>;
+	createsRightRailItem?: RightRailItemKind;
+}
+
+export interface CoordinatorToolResult {
+	toolCallId: string;
+	status: "completed" | "failed" | "canceled" | "awaiting_operator";
+	plainEnglishSummary: string;
+	technicalDetailsRef?: ArtifactReference;
+	createdReferences: ArtifactReference[];
+	rightRailUpdates: RightRailItem[];
+}
+
+export interface CoordinatorDialogueTurn {
+	turnId: string;
+	role: "operator" | "agent" | "system";
+	author: AuthorAttribution;
+	agentRole?: CoordinatorRole | string;
+	text: string;
+	references: ArtifactReference[];
+	toolCalls?: CoordinatorToolCall[];
+	createdAt: string;
+}
+
+export function toAuthorAttribution(
+	author: string | AuthorAttribution,
+	role: "operator" | "agent" | "system" = "operator",
+	agentRole?: string,
+): AuthorAttribution {
+	if (typeof author !== "string") {
+		return author;
+	}
+
+	const normalized = author.trim() || (role === "operator" ? "operator" : "agent");
+	const isAgent = role === "agent" || Boolean(agentRole);
+
+	return {
+		user: normalized,
+		role: agentRole,
+		isAgent,
+		displayName: normalized,
+	};
+}
+
+export function dialogueTurnToCoordinatorTurn(
+	turn: DialogueTurn,
+): CoordinatorDialogueTurn {
+	return {
+		turnId: turn.turnId,
+		role: turn.role,
+		author: toAuthorAttribution(turn.author, turn.role, turn.agentRole),
+		agentRole: turn.agentRole,
+		text: turn.text,
+		references: [],
+		createdAt: turn.timestamp,
+	};
 }
 
 export type DialogueAttentionState =

@@ -176,11 +176,7 @@ export function HomePriorityPanel() {
 									</div>
 									<AuthorChip
 										attribution={primaryAgentAttribution(item)}
-										addressedTo={
-											item.is_mine
-												? "you"
-												: item.assigned_operator_id || "operator"
-										}
+										addressedTo={item.is_mine ? "you" : "operator"}
 									/>
 									<Button
 										type="button"

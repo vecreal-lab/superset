@@ -6,6 +6,7 @@ import {
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { createFactoryCliRouter } from "./cli";
+import { createCoordinatorRouter } from "./coordinator";
 import { createDialogueRouter } from "./dialogue";
 import { createFactoryBrandAtomsRouter } from "./brand-atoms";
 import { createFactoryDomainKnowledgeRouter } from "./domain-knowledge";
@@ -18,6 +19,7 @@ const datasetSchema = z.enum(FACTORY_DATASETS);
 export const createFactoryRouter = () =>
 	router({
 		cli: createFactoryCliRouter(),
+		coordinator: createCoordinatorRouter(),
 		dialogue: createDialogueRouter(),
 		factoryBrandAtoms: createFactoryBrandAtomsRouter(),
 		domainKnowledge: createFactoryDomainKnowledgeRouter(),

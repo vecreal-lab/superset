@@ -4,11 +4,14 @@ import type {
 	ArtifactReference,
 	RightRailItem,
 	RightRailState,
+	WorkOrderRunState,
 } from "lib/types/factory-operator-console";
 import { GateCard } from "../GateCard";
 import { MergePacket } from "../MergePacket";
 import { MockupApprovalGrid } from "../MockupApprovalGrid";
 import { PipelineStrip } from "../PipelineStrip";
+import { RunStatusBadge } from "../RunStatusBadge";
+import { StaleStateNotice } from "../StaleStateNotice";
 import { PrimitiveButton, PrimitiveIcon, cardPaddingStyle, mutedTextStyle, rowStyle, stackStyle } from "../common";
 import { HandoffCard } from "./HandoffCard";
 
@@ -21,6 +24,7 @@ export interface RightRailContextPanelProps {
 	onExpandItem?: (itemId: string) => void;
 	onCollapse?: () => void;
 	onOpenReference?: (reference: ArtifactReference) => void;
+	onChatWithReference?: (reference: ArtifactReference) => void;
 	onAcceptHandoff?: (handoffId: string) => void;
 }
 
@@ -32,15 +36,25 @@ function groupItems(items: RightRailItem[], kind: RightRailItem["kind"]) {
 	return items.filter((item) => item.kind === kind);
 }
 
+function badgeStateForRunStatus(
+	status: NonNullable<RightRailItem["runState"]>["status"],
+): WorkOrderRunState {
+	if (status === "paused_for_gate") return "awaiting_approval";
+	if (status === "pending") return "queued";
+	return status;
+}
+
 function RightRailCard({
 	item,
 	onExpandItem,
 	onOpenReference,
+	onChatWithReference,
 	onAcceptHandoff,
 }: {
 	item: RightRailItem;
 	onExpandItem?: (itemId: string) => void;
 	onOpenReference?: (reference: ArtifactReference) => void;
+	onChatWithReference?: (reference: ArtifactReference) => void;
 	onAcceptHandoff?: (handoffId: string) => void;
 }) {
 	return (
@@ -65,16 +79,22 @@ function RightRailCard({
 			{item.expanded && item.mockups && <MockupApprovalGrid bundle={item.mockups} />}
 			{item.expanded && item.mergePacket && <MergePacket packet={item.mergePacket} />}
 			{item.expanded && item.runState && (
-				<PipelineStrip
-					stages={item.runState.stages.map((stage) => ({
-						stageId: stage.stageId,
-						role: stage.stageName,
-						label: stage.stageName,
-						hasOwnerGate: false,
-						isParallelizable: false,
-					}))}
-					currentStageId={item.runState.currentStageId}
-				/>
+				<div style={stackStyle}>
+					<RunStatusBadge state={badgeStateForRunStatus(item.runState.status)} />
+					<PipelineStrip
+						stages={item.runState.stages.map((stage) => ({
+							stageId: stage.stageId,
+							role: stage.stageName,
+							label: stage.stageName,
+							hasOwnerGate: false,
+							isParallelizable: false,
+						}))}
+						currentStageId={item.runState.currentStageId}
+					/>
+				</div>
+			)}
+			{item.expanded && item.staleStateNotice && (
+				<StaleStateNotice notice={item.staleStateNotice} />
 			)}
 			{item.expanded && item.handoff && (
 				<HandoffCard handoff={item.handoff} onAccept={onAcceptHandoff} />
@@ -82,16 +102,27 @@ function RightRailCard({
 			{item.references.length > 0 && (
 				<div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-3)" }}>
 					{item.references.map((reference) => (
-						<button
-							key={reference.referenceId}
-							type="button"
-							className="factory-button factory-button--ghost"
-							data-rail-target={reference.referenceId}
-							data-rail-target-kind={reference.kind}
-							onClick={() => onOpenReference?.(reference)}
-						>
-							{reference.label}
-						</button>
+						<span key={reference.referenceId} style={rowStyle}>
+							<button
+								type="button"
+								className="factory-button factory-button--ghost"
+								data-rail-target={reference.referenceId}
+								data-rail-target-kind={reference.kind}
+								onClick={() => onOpenReference?.(reference)}
+							>
+								{reference.label}
+							</button>
+							{onChatWithReference && (
+								<button
+									type="button"
+									className="factory-button factory-button--ghost"
+									data-chat-with-pc={reference.referenceId}
+									onClick={() => onChatWithReference(reference)}
+								>
+									Chat about this with PC
+								</button>
+							)}
+						</span>
 					))}
 				</div>
 			)}
@@ -108,6 +139,7 @@ export function RightRailContextPanel({
 	onExpandItem,
 	onCollapse,
 	onOpenReference,
+	onChatWithReference,
 	onAcceptHandoff,
 }: RightRailContextPanelProps) {
 	const [dragging, setDragging] = useState(false);
@@ -212,6 +244,7 @@ export function RightRailContextPanel({
 										item={item}
 										onExpandItem={onExpandItem}
 										onOpenReference={onOpenReference}
+										onChatWithReference={onChatWithReference}
 										onAcceptHandoff={onAcceptHandoff}
 									/>
 								))}

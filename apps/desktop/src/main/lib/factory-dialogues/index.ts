@@ -49,26 +49,16 @@ export const DEFAULT_DIALOGUE_PROJECT_ID = "software-factory";
 export const DEFAULT_CURRENT_OPERATOR_ID = "yuriy";
 const DEFAULT_CURRENT_OPERATOR_DISPLAY_NAME = "Yuriy";
 
-export interface DialogueParticipant {
-	user: string;
-	role?: string;
-	isAgent: boolean;
-	displayName: string;
-}
+export type DialogueParticipant = AuthorAttribution;
 
-export interface DialogueAuthorAttribution {
-	user: string;
-	role?: string;
-	isAgent: boolean;
-	displayName: string;
-}
+export type DialogueAuthorAttribution = AuthorAttribution;
 
 export interface DialogueMessage {
 	id: string;
 	dialogue_id: string;
 	kind: DialogueMessageKind;
 	speaker: string;
-	author?: string;
+	author_id?: string;
 	role_id?: string;
 	author?: DialogueAuthorAttribution;
 	content: string;
@@ -100,6 +90,7 @@ export interface DialogueRecord extends DialogueMetadata, DialogueStateFile {
 	last_message_preview: string;
 	primary_agent: string;
 	participants: AuthorAttribution[];
+	assigned_operator_id?: string;
 	is_mine: boolean;
 	stale_state_notice?: StaleStateNotice;
 }
@@ -344,6 +335,14 @@ function humanAuthor(operatorName = DEFAULT_FOUNDATION_OWNER_IDENTITY): Dialogue
 	};
 }
 
+function operatorAuthor(): DialogueAuthorAttribution {
+	return {
+		user: DEFAULT_CURRENT_OPERATOR_ID,
+		isAgent: false,
+		displayName: DEFAULT_CURRENT_OPERATOR_DISPLAY_NAME,
+	};
+}
+
 function roleAuthor(speaker: string, roleId?: string): DialogueAuthorAttribution {
 	const role = roleId || speaker;
 	return {
@@ -361,13 +360,26 @@ function previewMessage(messages: DialogueMessage[]): string {
 }
 
 function authorFromMessage(message: DialogueMessage): AuthorAttribution {
-	const isAgent = message.kind === "agent" || message.kind === "specialist";
+	const storedAuthor = message.author as AuthorAttribution | string | undefined;
+	if (storedAuthor && typeof storedAuthor === "object") {
+		return {
+			...storedAuthor,
+			role: storedAuthor.role || message.role_id,
+			displayName: storedAuthor.displayName || message.speaker,
+		};
+	}
+	const isAgent = message.kind !== "operator";
 	const role = message.role_id || (isAgent ? message.speaker : undefined);
+	const authorId =
+		message.author_id ||
+		(typeof storedAuthor === "string" ? storedAuthor : undefined) ||
+		(isAgent ? "agent" : DEFAULT_CURRENT_OPERATOR_ID);
 	return {
-		user: message.author || (isAgent ? "agent" : "yuriy"),
+		user: authorId,
 		role,
 		isAgent,
-		displayName: isAgent ? role || message.speaker : message.speaker || "Yuriy",
+		displayName:
+			isAgent ? role || message.speaker : message.speaker || DEFAULT_CURRENT_OPERATOR_DISPLAY_NAME,
 	};
 }
 
@@ -732,12 +744,16 @@ export class FactoryDialogueStore {
 		const participants = uniqueParticipants(messages);
 		const operatorParticipant =
 			participants.find((participant) => !participant.isAgent) || participants[0];
+		const assignedOperatorId =
+			normalizeOperatorIdentity(
+				String(metadataRaw.author || operatorParticipant?.user || DEFAULT_CURRENT_OPERATOR_ID),
+			) || DEFAULT_CURRENT_OPERATOR_ID;
 		return {
 			id: String(metadataRaw.id || path.basename(directory)),
 			project,
 			surface: String(metadataRaw.surface || "unknown"),
 			title: String(metadataRaw.title || "Untitled dialogue"),
-			author: String(metadataRaw.author || operatorParticipant?.user || "yuriy"),
+			author: assignedOperatorId,
 			created_at: String(metadataRaw.created_at || modifiedAt),
 			updated_at: String(metadataRaw.updated_at || modifiedAt),
 			archived: Boolean(metadataRaw.archived),
@@ -750,6 +766,7 @@ export class FactoryDialogueStore {
 			last_message_preview: previewMessage(messages),
 			primary_agent: surfacePrimaryAgent(String(metadataRaw.surface || "unknown")),
 			participants,
+			assigned_operator_id: assignedOperatorId,
 			is_mine: true,
 			stale_state_notice: staleStateNoticeFromState(stateRaw),
 		};
@@ -829,7 +846,8 @@ export class FactoryDialogueStore {
 			dialogue_id: dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
-			author: "yuriy",
+			author_id: DEFAULT_CURRENT_OPERATOR_ID,
+			author: operatorAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -838,7 +856,7 @@ export class FactoryDialogueStore {
 			dialogue_id: dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
-			author: "agent",
+			author_id: "dialogue_steward",
 			role_id: "DIALOGUE_STEWARD",
 			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: dialogueStewardResponse({
@@ -895,7 +913,8 @@ export class FactoryDialogueStore {
 				dialogue_id: dialogueId,
 				kind: "operator",
 				speaker: "Yuriy",
-				author: "yuriy",
+				author_id: DEFAULT_CURRENT_OPERATOR_ID,
+				author: operatorAuthor(),
 				content: input.message,
 				created_at: timestamp,
 			};
@@ -929,7 +948,8 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
-			author: "yuriy",
+			author_id: DEFAULT_CURRENT_OPERATOR_ID,
+			author: operatorAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -972,14 +992,15 @@ export class FactoryDialogueStore {
 				`Dialogue not found: ${project}/${input.surface}/${input.dialogueId}`,
 			);
 		}
+		const author = roleAuthor(input.speaker, input.roleId);
 		const message: DialogueMessage = {
 			id: randomUUID(),
 			dialogue_id: input.dialogueId,
 			kind: input.kind,
 			speaker: input.speaker,
-			author: input.kind === "system" ? "system" : "agent",
+			author_id: input.kind === "system" ? "system" : author.user,
 			role_id: input.roleId,
-			author: roleAuthor(input.speaker, input.roleId),
+			author,
 			content: input.content,
 			created_at: nowIso(),
 		};
@@ -1018,7 +1039,8 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "operator",
 			speaker: "Yuriy",
-			author: "yuriy",
+			author_id: DEFAULT_CURRENT_OPERATOR_ID,
+			author: operatorAuthor(),
 			content: input.message,
 			created_at: timestamp,
 		};
@@ -1027,7 +1049,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
-			author: "agent",
+			author_id: "dialogue_steward",
 			role_id: "DIALOGUE_STEWARD",
 			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: dialogueStewardResponse({
@@ -1384,7 +1406,7 @@ export class FactoryDialogueStore {
 			dialogue_id: input.dialogueId,
 			kind: "agent",
 			speaker: "DIALOGUE_STEWARD",
-			author: "agent",
+			author_id: "dialogue_steward",
 			role_id: "DIALOGUE_STEWARD",
 			author: roleAuthor("DIALOGUE_STEWARD", "DIALOGUE_STEWARD"),
 			content: `Commit recorded${input.documentPath ? ` for \`${normalizeSlashes(input.documentPath)}\`` : ""}. Cascade draft links: ${cascadeLinks || "none"} and [Approval Queue](/factory/approvals). The next implementation work order must cite this dialogue before writing.`,

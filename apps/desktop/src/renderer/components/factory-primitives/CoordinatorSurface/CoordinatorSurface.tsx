@@ -1,6 +1,7 @@
 import { Paperclip, Send } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type {
+	ArtifactReference,
 	CoordinatorSurfaceContext,
 	DialogueTurn,
 } from "lib/types/factory-operator-console";
@@ -14,8 +15,12 @@ export interface CoordinatorSurfaceProps {
 	turns: DialogueTurn[];
 	rightRail?: ReactNode;
 	inlineCards?: Record<string, ReactNode>;
+	draftComposerText?: string;
+	composerReferences?: ArtifactReference[];
 	onSend?: (message: string) => void;
 	onAttach?: () => void;
+	onDraftChange?: (draft: string) => void;
+	onMentionActivate?: (reference: ArtifactReference) => void;
 }
 
 function turnAuthor(turn: DialogueTurn) {
@@ -28,7 +33,13 @@ function turnAuthor(turn: DialogueTurn) {
 	};
 }
 
-function MessageText({ text }: { text: string }) {
+function MessageText({
+	text,
+	onMentionActivate,
+}: {
+	text: string;
+	onMentionActivate?: (reference: ArtifactReference) => void;
+}) {
 	const parts = text.split(/(WO-[A-Z0-9.]+|C[0-9]+(?:\.[0-9]+)?)/g);
 	return (
 		<>
@@ -43,6 +54,7 @@ function MessageText({ text }: { text: string }) {
 							label: part,
 							route: `/factory/work-orders/${part}`,
 						}}
+						onActivate={onMentionActivate}
 					/>
 				);
 			})}
@@ -55,15 +67,24 @@ export function CoordinatorSurface({
 	turns,
 	rightRail,
 	inlineCards = {},
+	draftComposerText = "",
+	composerReferences,
 	onSend,
 	onAttach,
+	onDraftChange,
+	onMentionActivate,
 }: CoordinatorSurfaceProps) {
-	const [draft, setDraft] = useState("");
+	const [draft, setDraft] = useState(draftComposerText);
+	const references = composerReferences ?? context.currentReferences;
+	useEffect(() => {
+		setDraft(draftComposerText);
+	}, [draftComposerText]);
 	const submit = () => {
 		const trimmed = draft.trim();
 		if (!trimmed) return;
 		onSend?.(trimmed);
 		setDraft("");
+		onDraftChange?.("");
 	};
 	return (
 		<section
@@ -110,7 +131,7 @@ export function CoordinatorSurface({
 								variant="inline"
 							/>
 							<p style={{ margin: 0, color: "var(--text-secondary)" }}>
-								<MessageText text={turn.text} />
+								<MessageText text={turn.text} onMentionActivate={onMentionActivate} />
 							</p>
 							{inlineCards[turn.turnId]}
 						</article>
@@ -129,8 +150,11 @@ export function CoordinatorSurface({
 						background: "var(--bg-card-bottom)",
 					}}
 				>
-					{context.activeMode === "research_intake" && (
-						<ResearchAttachmentDropZone references={context.currentReferences} />
+					{(context.activeMode === "research_intake" || references.length > 0) && (
+						<ResearchAttachmentDropZone
+							references={references}
+							onReferenceActivate={onMentionActivate}
+						/>
 					)}
 					<div style={rowStyle}>
 						<button
@@ -144,7 +168,10 @@ export function CoordinatorSurface({
 						</button>
 						<input
 							value={draft}
-							onChange={(event) => setDraft(event.currentTarget.value)}
+							onChange={(event) => {
+								setDraft(event.currentTarget.value);
+								onDraftChange?.(event.currentTarget.value);
+							}}
 							placeholder={`Message ${context.coordinatorRole}...`}
 							aria-label={`Message ${context.coordinatorRole}`}
 							style={{

@@ -7,6 +7,8 @@ import {
 } from "@tanstack/react-router";
 import { useState } from "react";
 import { env } from "renderer/env.renderer";
+import { FactoryShell } from "renderer/components/FactoryShell";
+import { TopBar as FactoryTopBar } from "renderer/components/TopBar";
 import { useIsV2CloudEnabled } from "renderer/hooks/useIsV2CloudEnabled";
 import { useHotkey } from "renderer/hotkeys";
 import { electronTrpc } from "renderer/lib/electron-trpc";
@@ -25,9 +27,7 @@ import {
 	useWorkspaceSidebarStore,
 } from "renderer/stores/workspace-sidebar-state";
 import { AddRepositoryModals } from "./components/AddRepositoryModals";
-import { TopBar } from "./components/TopBar";
-
-const FACTORY_SIDEBAR_WIDTH = 240;
+import { TopBar as DashboardTopBar } from "./components/TopBar";
 
 export const Route = createFileRoute("/_authenticated/_dashboard")({
 	component: DashboardLayout,
@@ -109,28 +109,20 @@ function DashboardLayout() {
 
 	if (isFactoryRoute) {
 		return (
-			<div className="flex h-full w-full overflow-hidden">
-				<div
-					className="drag h-8 w-full shrink-0 absolute top-0 left-0 right-0 z-10"
-					aria-hidden="true"
-				/>
-				<div
-					className="shrink-0 border-r"
-					style={{ width: `${FACTORY_SIDEBAR_WIDTH}px` }}
-				>
-					<FactorySidebar />
-				</div>
-				<div className="flex flex-1 min-h-0 min-w-0 flex-col pt-8">
-					<Outlet />
-				</div>
-			</div>
+			<FactoryShell
+				topBar={<FactoryTopBar />}
+				sidebar={<FactorySidebar />}
+				statusStrip={<FactoryStatusStrip />}
+			>
+				<Outlet />
+			</FactoryShell>
 		);
 	}
 
 	return (
 		<div className="flex h-full w-full overflow-hidden">
 			<div className="flex flex-1 flex-col min-w-0 min-h-0">
-				<TopBar />
+				<DashboardTopBar />
 				<div className="flex flex-1 min-h-0 min-w-0 overflow-hidden">
 					{isWorkspaceSidebarOpen && (
 						<ResizablePanel
@@ -176,5 +168,29 @@ function DashboardLayout() {
 				/>
 			)}
 		</div>
+	);
+}
+
+function FactoryStatusStrip() {
+	return (
+		<footer
+			aria-label="Factory status strip"
+			style={{
+				display: "flex",
+				alignItems: "center",
+				justifyContent: "space-between",
+				borderTop: "var(--factory-border-width) solid var(--border)",
+				background: "var(--bg-app)",
+				color: "var(--text-tertiary)",
+				fontFamily: "var(--font-mono)",
+				fontSize: "var(--sp-5)",
+				padding: "0 var(--sp-8)",
+			}}
+		>
+			<span>local-only cockpit</span>
+			<span>
+				FACTORY_LOCAL_ONLY={env.FACTORY_LOCAL_ONLY === "true" ? "true" : "false"}
+			</span>
+		</footer>
 	);
 }

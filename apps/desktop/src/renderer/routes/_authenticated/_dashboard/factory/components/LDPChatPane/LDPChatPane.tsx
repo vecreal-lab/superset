@@ -4,6 +4,7 @@ import { ScrollArea } from "@superset/ui/scroll-area";
 import { Textarea } from "@superset/ui/textarea";
 import { cn } from "@superset/ui/utils";
 import { ArrowDown, Send } from "lucide-react";
+import { RunStatusBadge } from "renderer/components/factory-primitives/RunStatusBadge";
 import {
 	type FormEvent,
 	useCallback,
@@ -160,7 +161,7 @@ export function LDPChatPane({
 						{isThinking && (
 							<div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
 								<span className="inline-flex items-center gap-2">
-									<LoadingBars />
+									<RunStatusBadge state="running" />
 									{thinkingLabel || `${agent.name} is reading context...`}
 								</span>
 							</div>

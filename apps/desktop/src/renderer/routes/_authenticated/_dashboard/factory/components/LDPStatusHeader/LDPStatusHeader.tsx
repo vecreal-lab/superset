@@ -26,6 +26,15 @@ type ProjectRow = {
 	title?: string;
 };
 
+function projectOwnerName(owner?: LDPStatusSummary["projectOwner"]): string {
+	if (!owner) return "";
+	return typeof owner === "string" ? owner : owner.owner;
+}
+
+function projectOwnerSourcePath(owner?: LDPStatusSummary["projectOwner"]): string | undefined {
+	return typeof owner === "object" ? owner.sourcePath : undefined;
+}
+
 function ProjectOwnerChip({ summary }: { summary: LDPStatusSummary }) {
 	const activeProjectId = useActiveProjectId();
 	const projects = electronTrpc.factory.dataset.useQuery(
@@ -37,7 +46,7 @@ function ProjectOwnerChip({ summary }: { summary: LDPStatusSummary }) {
 		(row: ProjectRow) => row.data.project_id === projectId,
 	) as ProjectRow | undefined;
 	const owner =
-		summary.projectOwner ||
+		projectOwnerName(summary.projectOwner) ||
 		(typeof projectRow?.data.primary_owner === "string"
 			? projectRow.data.primary_owner
 			: "") ||
@@ -93,8 +102,10 @@ export function LDPStatusHeader({ summary }: { summary: LDPStatusSummary }) {
 				{summary.sourcePath && (
 					<span className="font-mono">Source: {summary.sourcePath}</span>
 				)}
-				{summary.projectOwner?.sourcePath && (
-					<span className="font-mono">Owner source: {summary.projectOwner.sourcePath}</span>
+				{projectOwnerSourcePath(summary.projectOwner) && (
+					<span className="font-mono">
+						Owner source: {projectOwnerSourcePath(summary.projectOwner)}
+					</span>
 				)}
 				{summary.lastUpdated && <span>Updated {summary.lastUpdated}</span>}
 				{summary.flags?.map((flag) => (
