@@ -1,1 +1,0 @@
-export { LDPChatPane } from "./LDPChatPane";
