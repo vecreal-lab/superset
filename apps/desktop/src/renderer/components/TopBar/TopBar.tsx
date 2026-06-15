@@ -24,6 +24,11 @@ export function TopBar({
 	onProjectSwitch,
 	operatorInitials = "YL",
 }: TopBarProps) {
+	const shortcutLabel =
+		typeof navigator !== "undefined" && /Mac|iPhone|iPad|iPod/i.test(navigator.platform)
+			? "Cmd K"
+			: "Ctrl K";
+
 	return (
 		<header
 			aria-label="Cockpit top bar"
@@ -31,10 +36,10 @@ export function TopBar({
 				display: "grid",
 				gridTemplateColumns: "minmax(var(--sp-14), 1fr) minmax(var(--sp-14), calc(var(--sp-14) * 5)) auto auto",
 				alignItems: "center",
-				gap: "var(--sp-7)",
+				gap: "var(--sp-4)",
 				borderBottom: "var(--factory-border-width) solid var(--border)",
 				background: "var(--bg-app)",
-				padding: "0 var(--sp-8)",
+				padding: "0 var(--sp-6)",
 			}}
 		>
 			<ProjectSwitcher
@@ -48,9 +53,9 @@ export function TopBar({
 					display: "grid",
 					gridTemplateColumns: "auto 1fr auto",
 					alignItems: "center",
-					gap: "var(--sp-5)",
+					gap: "var(--sp-4)",
 					height: "var(--factory-control-height)",
-					padding: "0 var(--sp-6)",
+					padding: "0 var(--sp-4)",
 				}}
 			>
 				<PrimitiveIcon icon={Search} />
@@ -67,7 +72,7 @@ export function TopBar({
 					}}
 				/>
 				<span style={{ fontFamily: "var(--font-mono)", color: "var(--text-tertiary)" }}>
-					Cmd K
+					{shortcutLabel}
 				</span>
 			</label>
 			<button

@@ -10,7 +10,8 @@ import {
 } from "@superset/ui/table";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { CheckCircle2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import type { RunStateEvent } from "lib/types/factory-operator-console";
+import { useEffect, useMemo, useState } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useActiveProjectId } from "renderer/stores/active-project";
 import {
@@ -28,9 +29,12 @@ import {
 	LDPSurface,
 	useLDPSurfaceDialogue,
 	type LDPDialogueAgent,
+	type LDPDialogueTurn,
 	type LDPMetricTone,
 	type LDPStatusSummary,
 } from "../../components/LDPSurface";
+import { RunActionCards } from "./components/RunActionCards";
+import { RunStreamingPanel } from "./components/RunStreamingPanel";
 
 export const Route = createFileRoute(
 	"/_authenticated/_dashboard/factory/work-orders/$workOrderId/",
@@ -84,14 +88,69 @@ function metricToneForGate(gateState: string): LDPMetricTone {
 	return "default";
 }
 
+function streamTurnForEvent(event: RunStateEvent, index: number): LDPDialogueTurn {
+	const title =
+		event.kind === "stage_started"
+			? `${event.stage.stageName} started`
+			: event.kind === "stage_completed"
+				? `${event.stage.stageName} completed`
+				: event.kind === "stage_failed"
+					? `${event.stage.stageName} failed`
+					: event.kind === "gate_required"
+						? `${event.gate.type} gate required`
+						: event.kind === "mockups_generated"
+							? "Mockups generated"
+							: event.kind === "run_completed"
+								? "Run completed"
+								: event.kind === "run_failed"
+									? "Run failed"
+									: event.kind === "run_canceled"
+										? "Run canceled"
+										: "Runner event";
+	const body =
+		event.kind === "stage_failed"
+			? event.failureReason
+			: event.kind === "gate_required"
+				? event.gate.prompt
+				: event.kind === "mockups_generated"
+					? `${event.bundle.mockups.length} mockup(s) are ready for review.`
+					: event.kind === "run_completed"
+						? event.finalReceipt.summary
+						: event.kind === "run_failed"
+							? event.reason
+							: event.kind === "run_canceled"
+								? `Canceled by ${event.canceledBy.displayName}.`
+								: "The work-order runner reported progress.";
+	return {
+		id: `run-stream-${event.runId}-${event.kind}-${index}`,
+		kind: event.kind === "gate_required" ? "system" : "agent",
+		speaker: "Runner",
+		roleId: "ORCH",
+		content: `${title}\n${body}`,
+		timestamp: new Date().toISOString(),
+		author: {
+			user: "cockpit-runner-bridge",
+			role: "agent",
+			isAgent: true,
+			displayName: "Cockpit runner bridge",
+		},
+	};
+}
+
 function WorkOrderDetailPage() {
 	const { workOrderId } = Route.useParams();
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const [selectedRunPath, setSelectedRunPath] = useState<string | null>(null);
+	const [streamEvents, setStreamEvents] = useState<RunStateEvent[]>([]);
 	const activeProjectId = useActiveProjectId();
 	const search = Route.useSearch();
 	const navigate = useNavigate();
+	const utils = electronTrpc.useUtils();
 	const workOrder = electronTrpc.factory.workOrder.useQuery({ id: workOrderId });
+	const workOrderDetail = electronTrpc.factory.workOrders.detail.useQuery(
+		{ workOrderId },
+		{ refetchInterval: 4000 },
+	);
 	const workOrderDoc = electronTrpc.factory.document.useQuery(
 		{ path: workOrder.data?.source_relative_path || "" },
 		{ enabled: !!workOrder.data?.source_relative_path },
@@ -135,6 +194,10 @@ function WorkOrderDetailPage() {
 	);
 	const activeRunPath =
 		selectedRunPath || matchedRuns[0]?.source_relative_path.replace(/\/run\.json$/, "");
+	const latestRun = matchedRuns.find(
+		(run: FactoryRow) =>
+			run.source_relative_path.replace(/\/run\.json$/, "") === activeRunPath,
+	) || matchedRuns[0];
 	const runEvidence = electronTrpc.factory.runEvidence.useQuery(
 		{ runRelativePath: activeRunPath || "" },
 		{ enabled: !!activeRunPath, refetchInterval: 5000 },
@@ -148,6 +211,60 @@ function WorkOrderDetailPage() {
 	) || [];
 	const completedSlots = manifestSlots.filter((slot) => slot.complete).length;
 	const gateState = dataText(workOrder.data, "gate_state");
+	const runMutation = electronTrpc.factory.workOrders.run.useMutation({
+		onSuccess: async (result) => {
+			setSelectedRunPath(result.runRelativePath);
+			await Promise.all([
+				workOrderDetail.refetch(),
+				runs.refetch(),
+				utils.factory.workOrders.detail.invalidate({ workOrderId }),
+				utils.factory.workOrders.activeRuns.invalidate(),
+			]);
+		},
+	});
+	const cancelMutation = electronTrpc.factory.workOrders.cancel.useMutation({
+		onSuccess: async (result) => {
+			setSelectedRunPath(result.runRelativePath);
+			await Promise.all([
+				workOrderDetail.refetch(),
+				runs.refetch(),
+				utils.factory.workOrders.detail.invalidate({ workOrderId }),
+			]);
+		},
+	});
+	const resumeMutation = electronTrpc.factory.workOrders.resume.useMutation({
+		onSuccess: async (result) => {
+			setSelectedRunPath(result.runRelativePath);
+			await Promise.all([
+				workOrderDetail.refetch(),
+				runs.refetch(),
+				utils.factory.workOrders.detail.invalidate({ workOrderId }),
+			]);
+		},
+	});
+	electronTrpc.factory.workOrders.runEvents.useSubscription(
+		{ workOrderId, runId: workOrderDetail.data?.activeRun?.runId },
+		{
+			onData: (event) => {
+				if (event.kind === "run_state") {
+					setStreamEvents((previous) => [...previous, event.event].slice(-60));
+				}
+				if (event.kind === "snapshot" || event.kind === "capacity_changed") {
+					void workOrderDetail.refetch();
+				}
+			},
+		},
+	);
+	useEffect(() => {
+		setStreamEvents([]);
+	}, [workOrderId]);
+	const displayedTurns = useMemo(
+		() => [
+			...ldp.turns,
+			...streamEvents.map((event, index) => streamTurnForEvent(event, index)),
+		],
+		[ldp.turns, streamEvents],
+	);
 	const status: LDPStatusSummary = {
 		kind: "read_model",
 		label: "Work Order Detail",
@@ -163,6 +280,13 @@ function WorkOrderDetailPage() {
 			},
 			{ label: "Runs", value: matchedRuns.length },
 			{ label: "Evidence files", value: runEvidence.data?.length || 0 },
+			{
+				label: "Runner capacity",
+				value: workOrderDetail.data
+					? `${workOrderDetail.data.capacity.active}/${workOrderDetail.data.capacity.maxConcurrent}`
+					: "unknown",
+				tone: workOrderDetail.data?.capacity.atCapacity ? "warning" : "default",
+			},
 			{
 				label: "Manual slots",
 				value: manifestSlots.length ? `${completedSlots}/${manifestSlots.length}` : 0,
@@ -183,6 +307,29 @@ function WorkOrderDetailPage() {
 
 	const readPane = (
 		<div className="space-y-4">
+				<RunStreamingPanel
+					detail={workOrderDetail.data}
+					streamEvents={streamEvents}
+					evidenceFiles={runEvidence.data || []}
+					isLaunching={runMutation.isPending}
+					isCanceling={cancelMutation.isPending}
+					isResuming={resumeMutation.isPending}
+					onRun={() => runMutation.mutate({ workOrderId })}
+					onCancel={(runId) =>
+						cancelMutation.mutate({
+							runId,
+							canceledBy: {
+								user: "yuriy",
+								role: "operator",
+								isAgent: false,
+								displayName: "Yuriy",
+							},
+						})
+					}
+					onResume={(runId) => resumeMutation.mutate({ workOrderId, runId })}
+					onOpenSource={setSelectedSource}
+				/>
+
 				<div className="grid gap-4 lg:grid-cols-[1fr_22rem]">
 					<FactorySection title="Work order">
 						<div className="grid gap-3 md:grid-cols-2">
@@ -306,6 +453,16 @@ function WorkOrderDetailPage() {
 					)}
 				</FactorySection>
 
+				<RunActionCards
+					workOrderId={workOrderId}
+					activeRunPath={activeRunPath}
+					latestRun={latestRun}
+					pendingApproval={pendingApproval}
+					manifest={manifests.data?.[0] || null}
+					evidenceFiles={runEvidence.data || []}
+					onOpenSource={setSelectedSource}
+				/>
+
 				{manifests.data?.map((manifest: ManualMockupManifest) => (
 					<AttachmentSurface
 						key={manifest.run_id}
@@ -323,7 +480,7 @@ function WorkOrderDetailPage() {
 				description="Canonical work-order detail with run receipts, evidence, approval state, and manual mockup attachment slots."
 				status={status}
 				primaryAgent={WORK_ORDER_AGENT}
-				turns={ldp.turns}
+				turns={displayedTurns}
 				readPane={readPane}
 				inputValue={ldp.inputValue}
 				inputPlaceholder="Ask ORCH about this work order, its gates, scope, runs, or evidence..."

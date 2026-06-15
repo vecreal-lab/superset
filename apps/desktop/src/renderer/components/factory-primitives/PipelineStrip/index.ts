@@ -1,2 +1,5 @@
-export { PipelineStrip } from "./PipelineStrip";
-export type { PipelineStripProps } from "./PipelineStrip";
+export { PipelineStrip } from "renderer/components/vecreal/PipelineStrip";
+export type {
+	PipelineStage,
+	PipelineStripProps,
+} from "renderer/components/vecreal/PipelineStrip";

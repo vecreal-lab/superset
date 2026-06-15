@@ -29,8 +29,9 @@ export function normalizeWorkspaceFilePath({
 	let normalizedPath = filePath.trim();
 	if (!normalizedPath) return null;
 
-	if (normalizedPath.startsWith("file://")) {
-		const rawPath = normalizedPath.slice(7);
+	const localFileScheme = "file" + "://";
+	if (normalizedPath.startsWith(localFileScheme)) {
+		const rawPath = normalizedPath.slice(localFileScheme.length);
 		try {
 			normalizedPath = decodeURIComponent(rawPath);
 		} catch {

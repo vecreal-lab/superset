@@ -1,13 +1,13 @@
-import { PipelineStrip } from "./PipelineStrip";
+import { PipelineStrip, type PipelineStage } from ".";
 
-const stages = [
-	{ stageId: "scope", role: "PRODUCT_SCOPE", label: "Scope", hasOwnerGate: false, isParallelizable: false },
-	{ stageId: "uiux", role: "UIUX_SCOPE", label: "UIUX", hasOwnerGate: true, isParallelizable: false },
-	{ stageId: "arch", role: "ARCHITECTURE", label: "Arch", hasOwnerGate: false, isParallelizable: false },
-	{ stageId: "impl", role: "IMPLEMENTATION", label: "Impl", hasOwnerGate: false, isParallelizable: false },
-	{ stageId: "audit", role: "AUDIT", label: "Audit", hasOwnerGate: false, isParallelizable: false },
+const stages: PipelineStage[] = [
+	{ id: "scope", label: "Scope", state: "complete" },
+	{ id: "uiux", label: "UIUX", state: "complete" },
+	{ id: "arch", label: "Arch", state: "complete" },
+	{ id: "impl", label: "Impl", state: "active" },
+	{ id: "audit", label: "Audit", state: "pending" },
 ];
 
 export function PipelineStripDemo() {
-	return <PipelineStrip stages={stages} currentStageId="impl" />;
+	return <PipelineStrip stages={stages} />;
 }

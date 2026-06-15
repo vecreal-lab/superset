@@ -87,8 +87,10 @@ const config: Configuration = {
 		"!**/.DS_Store",
 	],
 
-	// Rebuild native modules for Electron's Node.js version
-	npmRebuild: true,
+	// Native packages are materialized from published prebuilts by
+	// copy:native-modules and validated before packaging. Avoid source rebuilds
+	// in electron-builder so Windows installs do not require compiler toolchains.
+	npmRebuild: false,
 
 	// macOS DMG installer
 	dmg: {

@@ -2,6 +2,7 @@ import type {
 	ArtifactReference,
 	HyperlinkedEntityMention,
 } from "lib/types/factory-operator-console";
+import { toSafeFactoryHref } from "renderer/lib/factory-protocol-url";
 import { cx } from "../common";
 
 export interface EntityMentionLinkProps {
@@ -21,7 +22,8 @@ export function EntityMentionLink({
 }: EntityMentionLinkProps) {
 	if (!reference) return <span>{children}</span>;
 	const label = children || mention?.displayText || reference.label;
-	const href = reference.route || reference.path || `/factory/references/${reference.referenceId}`;
+	const target = reference.route || reference.path || `/factory/references/${reference.referenceId}`;
+	const href = toSafeFactoryHref(target);
 	return (
 		<a
 			className={cx("factory-entity-mention", className)}

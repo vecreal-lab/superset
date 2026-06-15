@@ -1,4 +1,5 @@
 import { Badge } from "@superset/ui/badge";
+import { Button } from "@superset/ui/button";
 import {
 	Table,
 	TableBody,
@@ -54,6 +55,7 @@ interface PendingApproval {
 	packet: {
 		content: string;
 		source_relative_path: string;
+		modified_at?: string | null;
 	};
 	evidence_files: FactoryDocumentReference[];
 }
@@ -148,12 +150,31 @@ function ApprovalWorkflowRail({ approval }: { approval: PendingApproval }) {
 }
 
 function ApprovalsPage() {
+	const search = Route.useSearch();
+	return <ApprovalQueueContent search={search} navigateTo="/factory/approvals" />;
+}
+
+export function ApprovalQueueContent({
+	search,
+	navigateTo,
+}: {
+	search: { dialogueId?: string };
+	navigateTo: "/factory/approvals" | "/factory/approval-queue";
+}) {
 	const [selectedSource, setSelectedSource] = useState<string | null>(null);
 	const activeProjectId = useActiveProjectId();
-	const search = Route.useSearch();
 	const navigate = useNavigate();
 	const approvals = electronTrpc.factory.pendingApprovals.useQuery(undefined, {
 		refetchInterval: 5000,
+	});
+	const utils = electronTrpc.useUtils();
+	const respondGate = electronTrpc.factory.workOrders.respondGate.useMutation({
+		onSuccess: async () => {
+			await Promise.all([
+				utils.factory.pendingApprovals.invalidate(),
+				utils.factory.dataset.invalidate(),
+			]);
+		},
 	});
 	const workOrders = electronTrpc.factory.dataset.useQuery(
 		{ dataset: "work_orders" },
@@ -166,7 +187,7 @@ function ApprovalsPage() {
 		initialDialogueId: search.dialogueId,
 		onDialogueIdChange: (dialogueId) =>
 			navigate({
-				to: "/factory/approvals",
+				to: navigateTo,
 				search: { dialogueId },
 				replace: true,
 			}),
@@ -224,6 +245,31 @@ function ApprovalsPage() {
 			{ label: `Origin: ${originRoles.slice(0, 3).join(", ") || "none"}` },
 		],
 	};
+	const submitApproval = (
+		approval: PendingApproval,
+		decision: "approved" | "revision_requested",
+	) => {
+		const notes =
+			decision === "approved"
+				? "Approved in cockpit approval queue."
+				: window.prompt("What should the agents revise?", "");
+		if (notes === null) return;
+		respondGate.mutate({
+			runRelativePath: approval.run_relative_path,
+			gate: approval.gate,
+			gateId: approval.id,
+			decision,
+			notes,
+			decidedBy: {
+				user: "Yuriy",
+				role: "operator",
+				isAgent: false,
+				displayName: "Yuriy",
+			},
+			awaitingPacketPath: approval.packet.source_relative_path,
+			expectedPacketModifiedAt: approval.packet.modified_at || null,
+		});
+	};
 
 	const readPane = (
 		<div className="space-y-4">
@@ -237,6 +283,7 @@ function ApprovalsPage() {
 							<TableHead>Origin role</TableHead>
 							<TableHead>Packet</TableHead>
 							<TableHead>Evidence</TableHead>
+							<TableHead>Action</TableHead>
 						</TableRow>
 					</TableHeader>
 					<TableBody>
@@ -283,6 +330,25 @@ function ApprovalsPage() {
 												+{approval.evidence_files.length - 8} more
 											</span>
 										)}
+									</div>
+								</TableCell>
+								<TableCell>
+									<div className="flex flex-col gap-2">
+										<Button
+											size="sm"
+											onClick={() => submitApproval(approval, "approved")}
+										>
+											Approve
+										</Button>
+										<Button
+											size="sm"
+											variant="outline"
+											onClick={() =>
+												submitApproval(approval, "revision_requested")
+											}
+										>
+											Request revision
+										</Button>
 									</div>
 								</TableCell>
 							</TableRow>

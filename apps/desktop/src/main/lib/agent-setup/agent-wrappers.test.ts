@@ -888,36 +888,17 @@ describe("agent-wrappers codex hooks.json", () => {
 		rmSync(TEST_ROOT, { recursive: true, force: true });
 	});
 
-	it("creates Codex hooks.json with prompt and lifecycle hooks when no file exists", () => {
+	it("does not create global Codex lifecycle hooks when no file exists", () => {
 		const notifyPath = "/tmp/.superset/hooks/notify.sh";
 		const content = getCodexGlobalHooksJsonContent(notifyPath);
 		expect(content).not.toBeNull();
 		if (content === null) throw new Error("Expected content");
 
-		const parsed = JSON.parse(content) as {
-			hooks: Record<
-				string,
-				Array<{
-					matcher?: string;
-					hooks: Array<{ type: string; command: string }>;
-				}>
-			>;
-		};
+		const parsed = JSON.parse(content) as { hooks: Record<string, unknown> };
 
-		for (const eventName of [
-			"SessionStart",
-			"UserPromptSubmit",
-			"Stop",
-		] as const) {
-			const hooks = parsed.hooks[eventName];
-			expect(Array.isArray(hooks)).toBe(true);
-			expect(
-				hooks.some((def) =>
-					def.hooks.some((hook) => hook.command === notifyPath),
-				),
-			).toBe(true);
-		}
-
+		expect(parsed.hooks.SessionStart).toBeUndefined();
+		expect(parsed.hooks.UserPromptSubmit).toBeUndefined();
+		expect(parsed.hooks.Stop).toBeUndefined();
 		expect(parsed.hooks.PreToolUse).toBeUndefined();
 		expect(parsed.hooks.PostToolUse).toBeUndefined();
 	});
@@ -1018,8 +999,9 @@ describe("agent-wrappers codex hooks.json", () => {
 			),
 		).toBe(true);
 
-		// Adds managed hooks for SessionStart, UserPromptSubmit, Stop
-		for (const eventName of ["SessionStart", "UserPromptSubmit", "Stop"]) {
+		// Does NOT inject managed hooks for SessionStart/UserPromptSubmit/Stop.
+		expect(parsed.hooks.SessionStart).toBeUndefined();
+		for (const eventName of ["UserPromptSubmit", "Stop"]) {
 			expect(
 				parsed.hooks[eventName].some(
 					(def: { hooks: Array<{ command: string }> }) =>
@@ -1027,7 +1009,7 @@ describe("agent-wrappers codex hooks.json", () => {
 							(hook: { command: string }) => hook.command === notifyPath,
 						),
 				),
-			).toBe(true);
+			).toBe(false);
 		}
 
 		// Does NOT inject managed hooks for PreToolUse/PostToolUse
@@ -1049,7 +1031,7 @@ describe("agent-wrappers codex hooks.json", () => {
 		).toBe(false);
 	});
 
-	it("replaces stale Codex hook commands from old superset paths", () => {
+	it("removes stale Codex hook commands from old superset paths", () => {
 		const codexHooksPath = path.join(mockedHomeDir, ".codex", "hooks.json");
 		const staleHookPath = "/tmp/.superset-old/hooks/notify.sh";
 		const currentHookPath = "/tmp/.superset-new/hooks/notify.sh";
@@ -1098,24 +1080,18 @@ describe("agent-wrappers codex hooks.json", () => {
 			>;
 		};
 
-		for (const eventName of [
-			"SessionStart",
-			"UserPromptSubmit",
-			"Stop",
-		] as const) {
-			const hooks = parsed.hooks[eventName];
-			expect(Array.isArray(hooks)).toBe(true);
-			expect(
-				hooks.some((def) =>
-					def.hooks.some((hook) => hook.command === currentHookPath),
-				),
-			).toBe(true);
-			expect(
-				hooks.some((def) =>
-					def.hooks.some((hook) => hook.command.includes(staleHookPath)),
-				),
-			).toBe(false);
-		}
+		expect(parsed.hooks.SessionStart).toBeUndefined();
+		expect(parsed.hooks.UserPromptSubmit).toBeUndefined();
+		expect(
+			parsed.hooks.Stop.some((def) =>
+				def.hooks.some((hook) => hook.command.includes(staleHookPath)),
+			),
+		).toBe(false);
+		expect(
+			parsed.hooks.Stop.some((def) =>
+				def.hooks.some((hook) => hook.command === currentHookPath),
+			),
+		).toBe(false);
 
 		// Custom hook preserved
 		expect(
@@ -1190,7 +1166,7 @@ describe("agent-wrappers codex hooks.json", () => {
 			parsed.hooks.UserPromptSubmit?.some((def) =>
 				def.hooks.some((hook) => hook.command === currentHookPath),
 			),
-		).toBe(true);
+		).toBe(false);
 	});
 
 	it("reaps stale notify.sh paths from in-repo dev worktrees", () => {
@@ -1236,24 +1212,53 @@ describe("agent-wrappers codex hooks.json", () => {
 			>;
 		};
 
-		for (const eventName of [
-			"SessionStart",
-			"UserPromptSubmit",
-			"Stop",
-		] as const) {
-			const hooks = parsed.hooks[eventName];
-			expect(Array.isArray(hooks)).toBe(true);
-			expect(
-				hooks.some((def) =>
-					def.hooks.some((hook) => hook.command === currentHookPath),
-				),
-			).toBe(true);
-			expect(
-				hooks.some((def) =>
-					def.hooks.some((hook) => hook.command === staleHookPath),
-				),
-			).toBe(false);
-		}
+		expect(parsed.hooks.SessionStart).toBeUndefined();
+		expect(parsed.hooks.UserPromptSubmit).toBeUndefined();
+		expect(parsed.hooks.Stop).toBeUndefined();
+	});
+
+	it("reaps stale Windows smoke-home notify hooks from Codex hooks.json", () => {
+		const codexHooksPath = path.join(mockedHomeDir, ".codex", "hooks.json");
+		const staleTempHomeHook =
+			"C:\\Users\\test\\AppData\\Local\\Temp\\drawer-smoke-123\\home\\hooks\\notify.sh";
+		const staleSmokeHook =
+			"C:\\Users\\test\\repo\\runs\\wo-cs\\cockpit-boot-smoke\\manual-home\\hooks\\notify.sh";
+		const staleLauncherHook =
+			"C:\\Users\\test\\repo\\runs\\wo-cl.4-launcher-fix\\launcher-runs\\superset-home-1\\hooks\\notify.sh";
+		const currentHookPath = "C:\\Users\\test\\.superset\\hooks\\notify.sh";
+
+		mkdirSync(path.dirname(codexHooksPath), { recursive: true });
+		writeFileSync(
+			codexHooksPath,
+			JSON.stringify(
+				{
+					hooks: {
+						SessionStart: [
+							{ hooks: [{ type: "command", command: staleTempHomeHook }] },
+						],
+						UserPromptSubmit: [
+							{ hooks: [{ type: "command", command: staleSmokeHook }] },
+							{ hooks: [{ type: "command", command: staleLauncherHook }] },
+						],
+						Stop: [{ hooks: [{ type: "command", command: currentHookPath }] }],
+					},
+				},
+				null,
+				2,
+			),
+		);
+
+		const content = getCodexGlobalHooksJsonContent(currentHookPath);
+		expect(content).not.toBeNull();
+		if (content === null) throw new Error("Expected content");
+
+		const parsed = JSON.parse(content) as {
+			hooks: Record<string, Array<{ hooks: Array<{ command: string }> }>>;
+		};
+
+		expect(parsed.hooks.SessionStart).toBeUndefined();
+		expect(parsed.hooks.UserPromptSubmit).toBeUndefined();
+		expect(parsed.hooks.Stop).toBeUndefined();
 	});
 
 	it("skips Codex hooks writes when existing JSON is invalid", () => {

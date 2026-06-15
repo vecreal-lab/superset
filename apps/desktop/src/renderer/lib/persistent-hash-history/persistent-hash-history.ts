@@ -19,12 +19,21 @@ export interface HistoryEntry {
 	timestamp: number;
 }
 
-// FACTORY_LOCAL_ONLY: default landing route is the factory cockpit, not "/"
-// (which has no matching route — historically resolved to /workspace via
-// upstream sign-in redirect, but our cockpit lives at /factory).
+// FACTORY_LOCAL_ONLY: default landing route is the factory cockpit, not "/".
+// The upstream sign-in flow may redirect "/" to /workspace, but this cockpit
+// lives at /factory.
 const FACTORY_DEFAULT_ROUTE = "/factory";
 
+function routeFromCurrentHash(): string | undefined {
+	const hash = window.location.hash.replace(/^#/, "");
+	if (!hash) return undefined;
+	return hash.startsWith("/") ? hash : `/${hash}`;
+}
+
 function loadPersistedState(): PersistedState {
+	const launchRoute = routeFromCurrentHash();
+	if (launchRoute) return { entries: [launchRoute], index: 0 };
+
 	try {
 		const raw = localStorage.getItem(STORAGE_KEY);
 		if (raw) {

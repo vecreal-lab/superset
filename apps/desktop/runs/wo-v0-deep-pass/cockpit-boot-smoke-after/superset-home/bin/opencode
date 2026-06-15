@@ -1,0 +1,29 @@
+#!/bin/bash
+# Superset agent-wrapper v1
+# Superset wrapper for opencode
+
+find_real_binary() {
+  local name="$1"
+  local IFS=:
+  for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    dir="${dir%/}"
+    case "$dir" in
+      "C:\Users\levyt\OneDrive\Documents\Software-Factory\vendor\superset-sh\apps\desktop\runs\wo-v0-deep-pass\cockpit-boot-smoke-after\superset-home\bin"|"$HOME"/.superset/bin|"$HOME"/.superset-*/bin) continue ;;
+    esac
+    if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
+      printf "%s\n" "$dir/$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+REAL_BIN="$(find_real_binary "opencode")"
+if [ -z "$REAL_BIN" ]; then
+  echo "Superset: opencode not found in PATH. Install it and ensure it is on PATH, then retry." >&2
+  exit 127
+fi
+
+export OPENCODE_CONFIG_DIR="C:\Users\levyt\OneDrive\Documents\Software-Factory\vendor\superset-sh\apps\desktop\runs\wo-v0-deep-pass\cockpit-boot-smoke-after\superset-home\hooks\opencode"
+exec "$REAL_BIN" "$@"

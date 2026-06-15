@@ -24,9 +24,15 @@ export class CliCoordinatorProvider implements CoordinatorProvider {
 			signal: input.signal,
 			onChunk: input.onChunk,
 		});
+		const text = result.text.trim();
+		if (!text) {
+			throw new Error(
+				"PROJECT_COORDINATOR CLI provider returned an empty response.",
+			);
+		}
 
 		return {
-			text: result.text,
+			text,
 			provider: "cli",
 			sessionId: result.sessionId,
 			exitCode: result.exitCode,

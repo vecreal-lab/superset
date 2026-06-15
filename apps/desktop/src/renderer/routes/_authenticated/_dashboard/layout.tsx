@@ -5,10 +5,11 @@ import {
 	useMatchRoute,
 	useNavigate,
 } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { env } from "renderer/env.renderer";
 import { FactoryShell } from "renderer/components/FactoryShell";
 import { TopBar as FactoryTopBar } from "renderer/components/TopBar";
+import { RouteErrorBoundary } from "renderer/components/factory-primitives/RouteErrorBoundary";
 import type { ProjectSwitcherNode } from "renderer/components/factory-primitives/ProjectSwitcher";
 import { useIsV2CloudEnabled } from "renderer/hooks/useIsV2CloudEnabled";
 import { useHotkey } from "renderer/hotkeys";
@@ -191,6 +192,15 @@ function DashboardLayout() {
 		});
 	};
 
+	useEffect(() => {
+		if (
+			env.FACTORY_LOCAL_ONLY === "true" &&
+			location.pathname === "/automations"
+		) {
+			void navigate({ to: "/v2-workspaces", replace: true });
+		}
+	}, [location.pathname, navigate]);
+
 	if (isFactoryRoute) {
 		return (
 			<FactoryShell
@@ -204,7 +214,9 @@ function DashboardLayout() {
 				sidebar={<FactorySidebar />}
 				statusStrip={<FactoryStatusStrip />}
 			>
-				<Outlet />
+				<RouteErrorBoundary routePath={location.pathname}>
+					<Outlet />
+				</RouteErrorBoundary>
 			</FactoryShell>
 		);
 	}
@@ -240,7 +252,9 @@ function DashboardLayout() {
 						</ResizablePanel>
 					)}
 					<div className="flex flex-1 min-h-0 min-w-0">
-						<Outlet />
+						<RouteErrorBoundary routePath={location.pathname}>
+							<Outlet />
+						</RouteErrorBoundary>
 					</div>
 				</div>
 			</div>

@@ -1,7 +1,7 @@
-import { Toaster } from "@superset/ui/sonner";
+import { ToastNotificationViewport } from "renderer/components/vecreal/ToastNotification";
 import { useTheme } from "renderer/stores/theme/store";
 
 export function ThemedToaster() {
 	const theme = useTheme();
-	return <Toaster expand theme={theme?.type ?? "dark"} />;
+	return <ToastNotificationViewport theme={theme?.type ?? "dark"} />;
 }

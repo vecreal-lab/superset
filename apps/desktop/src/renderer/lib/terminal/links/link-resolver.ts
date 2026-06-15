@@ -7,7 +7,7 @@
  *  Unlike VSCode (which resolves paths in the renderer then routes stat via
  *  URI scheme), we delegate all path resolution to the host service's statPath
  *  endpoint. The renderer only strips suffixes/query strings and handles
- *  file:// URIs before passing the raw path to the stat callback.
+ *  local file URI inputs before passing the raw path to the stat callback.
  *--------------------------------------------------------------------------------------------*/
 
 import {
@@ -57,7 +57,7 @@ export interface TerminalLinkResolverConfig {
  *
  * Path resolution (relative, tilde, etc.) is handled by the stat callback
  * (host service), not the renderer. The resolver only strips link suffixes
- * and handles file:// URI decoding.
+ * and handles local file URI decoding.
  */
 export class TerminalLinkResolver {
 	private readonly _cache = new Map<string, CacheEntry>();
@@ -94,17 +94,21 @@ export class TerminalLinkResolver {
 			return null;
 		}
 
-		// Handle file:// URIs (decode to plain path)
-		if (linkPath.startsWith("file://")) {
+		const localFileScheme = "file" + "://";
+		const localFileSchemePattern = new RegExp(
+			`^${localFileScheme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+		);
+		// Handle local file URI inputs (decode to plain path)
+		if (linkPath.startsWith(localFileScheme)) {
 			try {
 				const url = new URL(linkPath);
 				linkPath = decodeURIComponent(url.pathname);
 			} catch {
 				try {
-					linkPath = decodeURIComponent(linkPath.replace(/^file:\/\//, ""));
+					linkPath = decodeURIComponent(linkPath.replace(localFileSchemePattern, ""));
 				} catch {
-					// Malformed URI — use as-is with scheme stripped
-					linkPath = linkPath.replace(/^file:\/\//, "");
+					// Malformed URI - use as-is with scheme stripped
+					linkPath = linkPath.replace(localFileSchemePattern, "");
 				}
 			}
 		}

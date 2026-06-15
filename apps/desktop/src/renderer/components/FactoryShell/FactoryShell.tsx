@@ -18,7 +18,7 @@ export interface FactoryShellProps {
 // Text: --text-primary (light) / --text-dark-primary (dark).
 function VecrealWordmark({
 	className = "",
-	width = 110,
+	width = 88,
 }: {
 	className?: string;
 	width?: number;
@@ -35,9 +35,9 @@ function VecrealWordmark({
 			style={{ display: "inline-block", verticalAlign: "middle" }}
 		>
 			<style>{`
-				.vecreal-wordmark .bk-v { fill: var(--clay-bright, #C68070); }
-				.vecreal-wordmark .bk-text { fill: var(--text-dark-primary, #f7f8f8); }
-				.vecreal-wordmark .bk-dot { fill: var(--clay-bright, #C68070); }
+				.vecreal-wordmark .bk-v { fill: var(--clay-bright); }
+				.vecreal-wordmark .bk-text { fill: var(--text-dark-primary); }
+				.vecreal-wordmark .bk-dot { fill: var(--clay-bright); }
 			`}</style>
 			{/* V path (from reference-design-system.html bk-v) */}
 			<path
@@ -117,7 +117,7 @@ export function FactoryShell({
 				}}
 			>
 				<header className="factory-titlebar" aria-label="Application title bar">
-					<div style={{ paddingLeft: "var(--sp-8)" }}>
+					<div style={{ paddingLeft: "var(--sp-6)" }}>
 						<VecrealWordmark />
 					</div>
 					<div style={{ flex: 1, height: "100%" }} aria-hidden="true" />

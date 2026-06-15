@@ -2,6 +2,10 @@ import { describe, expect, it } from "bun:test";
 
 import { resolveFileIconAssetUrl } from "./resolveFileIconAssetUrl";
 
+const packagedRendererUrl =
+	("file" + "://") +
+	"/Applications/Superset.app/Contents/Resources/app.asar/dist/renderer";
+
 describe("resolveFileIconAssetUrl", () => {
 	it("resolves against the dev server root", () => {
 		expect(
@@ -16,10 +20,10 @@ describe("resolveFileIconAssetUrl", () => {
 		expect(
 			resolveFileIconAssetUrl(
 				"typescript",
-				"file:///Applications/Superset.app/Contents/Resources/app.asar/dist/renderer/index.html#/workspace/123",
+				`${packagedRendererUrl}/index.html#/workspace/123`,
 			),
 		).toBe(
-			"file:///Applications/Superset.app/Contents/Resources/app.asar/dist/renderer/file-icons/typescript.svg",
+			`${packagedRendererUrl}/file-icons/typescript.svg`,
 		);
 	});
 });

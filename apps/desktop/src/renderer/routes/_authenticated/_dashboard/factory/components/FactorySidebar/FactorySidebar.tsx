@@ -1,17 +1,12 @@
 import { cn } from "@superset/ui/utils";
-import { useRouterState } from "@tanstack/react-router";
-import { DialogueAttentionBadge } from "renderer/components/factory-primitives/DialogueAttentionBadge";
-import { useFactoryActiveProjectId } from "lib/stores/workspace";
-import { useDialogueAttentionCounts } from "../../hooks/useDialogueAttentionCounts";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { FactoryCliStatusBadges } from "./components/FactoryCliStatusBadges";
 
 interface FactoryNavItem {
 	to: string;
 	label: string;
-	surface: string;
 	exact?: boolean;
 	activePrefix?: string;
-	projectScoped?: boolean;
 }
 
 interface FactoryNavGroup {
@@ -21,75 +16,48 @@ interface FactoryNavGroup {
 
 const NAV_GROUPS: FactoryNavGroup[] = [
 	{
-		label: "Home / Overview",
-		items: [{ to: "/factory", label: "Home", surface: "home", exact: true }],
-	},
-	{
 		label: "Active Work",
 		items: [
+			{ to: "/factory", label: "Mission Canvas", exact: true },
 			{
-				to: "/factory/projects",
-				label: "Project Coordinator",
-				surface: "project-coordinator",
-				activePrefix: "/factory/projects",
-				projectScoped: true,
-			},
-			{ to: "/factory/work-orders", label: "Work Orders", surface: "work-orders" },
-			{ to: "/factory/approvals", label: "Approvals", surface: "approvals" },
-			{ to: "/factory/dialogues", label: "Dialogues", surface: "dialogues" },
-			{ to: "/factory/intake", label: "Intake", surface: "intake" },
-		],
-	},
-	{
-		label: "Design + UIUX",
-		items: [
-			{ to: "/factory/design", label: "Design", surface: "design" },
-			{ to: "/factory/uiux", label: "UIUX Area", surface: "uiux" },
-		],
-	},
-	{
-		label: "Read / Reference",
-		items: [
-			{ to: "/factory/foundations", label: "Foundations", surface: "foundations" },
-			{ to: "/factory/decisions", label: "Decisions", surface: "decisions" },
-			{ to: "/factory/lessons", label: "Lessons", surface: "lessons" },
-			{ to: "/factory/roles", label: "Roles", surface: "roles" },
-			{
-				to: "/factory/strategy-pulse",
-				label: "Strategy Pulse",
-				surface: "strategy-pulse",
-			},
-			{
-				to: "/factory/build-vs-compose",
-				label: "Build vs Compose",
-				surface: "build-vs-compose",
+				to: "/factory/approval-queue",
+				label: "Approval Queue",
+				activePrefix: "/factory/approval-queue",
 			},
 		],
 	},
 	{
-		label: "Audit / Review",
+		label: "Work",
 		items: [
-			{ to: "/factory/audit-findings", label: "Audit Findings", surface: "audit" },
-			{
-				to: "/factory/synthesis-receipts",
-				label: "SYNTHESIS Receipts",
-				surface: "synthesis",
-			},
+			{ to: "/factory/work-orders", label: "Work Orders" },
+			{ to: "/factory/decks", label: "Decks" },
+		],
+	},
+	{
+		label: "Knowledge",
+		items: [
+			{ to: "/factory/foundations", label: "Foundations" },
+			{ to: "/factory/design", label: "Design" },
+			{ to: "/factory/uiux", label: "UIUX" },
+		],
+	},
+	{
+		label: "Review",
+		items: [
+			{ to: "/factory/audit-findings", label: "Audit Findings" },
+			{ to: "/factory/synthesis-receipts", label: "Synthesis Receipts" },
+			{ to: "/factory/lessons", label: "Lessons" },
 		],
 	},
 	{
 		label: "System",
-		items: [{ to: "/factory/settings", label: "Settings", surface: "settings" }],
+		items: [{ to: "/settings", label: "Settings" }],
 	},
 ];
 
-function hrefForItem(item: FactoryNavItem, activeProjectId: string) {
-	return item.projectScoped ? `${item.to}/${activeProjectId}` : item.to;
-}
-
-function isActivePath(pathname: string, item: FactoryNavItem, href: string) {
-	const activeRoot = item.activePrefix ?? href;
-	if (item.exact) return pathname === href || pathname === `${href}/`;
+function isActivePath(pathname: string, item: FactoryNavItem) {
+	const activeRoot = item.activePrefix ?? item.to;
+	if (item.exact) return pathname === item.to || pathname === `${item.to}/`;
 	return (
 		pathname === activeRoot ||
 		pathname === `${activeRoot}/` ||
@@ -99,9 +67,7 @@ function isActivePath(pathname: string, item: FactoryNavItem, href: string) {
 
 export function FactorySidebar() {
 	const pathname = useRouterState({ select: (s) => s.location.pathname });
-	const activeProjectId = useFactoryActiveProjectId();
-	const { mineCountForSurface, hasMineAttentionForSurface } =
-		useDialogueAttentionCounts();
+	const navigate = useNavigate();
 
 	return (
 		<aside
@@ -123,26 +89,24 @@ export function FactorySidebar() {
 						</div>
 						<ul className="flex flex-col gap-0.5">
 							{group.items.map((item) => {
-								const href = hrefForItem(item, activeProjectId);
-								const active = isActivePath(pathname, item, href);
-								const attentionCount = mineCountForSurface(item.surface);
+								const active = isActivePath(pathname, item);
 								return (
-									<li key={`${item.surface}-${href}`}>
+									<li key={item.to}>
 										<a
-											href={href}
+											href={`#${item.to}`}
 											aria-current={active ? "page" : undefined}
 											className={cn(
-												"grid min-h-7 grid-cols-[minmax(0,1fr)_auto] items-center gap-2 rounded-md border-l-[3px] px-2 py-1 text-[12px] leading-none no-underline transition-colors",
+												"grid min-h-7 grid-cols-[minmax(0,1fr)] items-center gap-2 rounded-md border-l-[3px] px-2 py-1 text-[12px] leading-none no-underline transition-colors",
 												active
 													? "border-l-[var(--accent)] text-[var(--text-dark-primary)]"
 													: "border-l-transparent hover:text-[var(--text-dark-primary)]",
 											)}
+											onClick={(event) => {
+												event.preventDefault();
+												void navigate({ to: item.to as "/factory" });
+											}}
 										>
 											<span className="truncate">{item.label}</span>
-											<DialogueAttentionBadge
-												count={attentionCount}
-												hasMineAttention={hasMineAttentionForSurface(item.surface)}
-											/>
 										</a>
 									</li>
 								);
@@ -152,7 +116,7 @@ export function FactorySidebar() {
 				))}
 			</nav>
 			<div className="border-t px-4 py-3 text-xs" style={{ color: "var(--text-dark-muted)" }}>
-				<div>v0 local-only</div>
+				<div>v0.5 visual-only</div>
 				<div className="mt-0.5 truncate">FACTORY_LOCAL_ONLY=true</div>
 				<FactoryCliStatusBadges />
 			</div>

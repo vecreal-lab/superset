@@ -1,0 +1,77 @@
+#!/bin/bash
+# Superset agent-wrapper v1
+# Superset wrapper for copilot
+
+find_real_binary() {
+  local name="$1"
+  local IFS=:
+  for dir in $PATH; do
+    [ -z "$dir" ] && continue
+    dir="${dir%/}"
+    case "$dir" in
+      "C:\Users\levyt\OneDrive\Documents\Software-Factory\vendor\superset-sh\apps\desktop\runs\wo-v0-deep-pass\cockpit-boot-smoke-after\superset-home\bin"|"$HOME"/.superset/bin|"$HOME"/.superset-*/bin) continue ;;
+    esac
+    if [ -x "$dir/$name" ] && [ ! -d "$dir/$name" ]; then
+      printf "%s\n" "$dir/$name"
+      return 0
+    fi
+  done
+  return 1
+}
+
+REAL_BIN="$(find_real_binary "copilot")"
+if [ -z "$REAL_BIN" ]; then
+  echo "Superset: copilot not found in PATH. Install it and ensure it is on PATH, then retry." >&2
+  exit 127
+fi
+
+# Copilot CLI only supports project-level hooks (.github/hooks/*.json in CWD).
+# Auto-inject Superset notification hooks when running inside a Superset terminal.
+if [ -n "$SUPERSET_TAB_ID" ] && [ -f "C:\Users\levyt\OneDrive\Documents\Software-Factory\vendor\superset-sh\apps\desktop\runs\wo-v0-deep-pass\cockpit-boot-smoke-after\superset-home\hooks\copilot-hook.sh" ]; then
+  COPILOT_HOOKS_DIR=".github/hooks"
+  COPILOT_HOOK_FILE="$COPILOT_HOOKS_DIR/superset-notify.json"
+
+  # Always refresh our dedicated hook file so stale absolute hook paths from
+  # older installs/workspaces cannot silently break notifications.
+  mkdir -p "$COPILOT_HOOKS_DIR" 2>/dev/null
+  printf '%s\n' '{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "type": "command",
+        "bash": "C:\\Users\\levyt\\OneDrive\\Documents\\Software-Factory\\vendor\\superset-sh\\apps\\desktop\\runs\\wo-v0-deep-pass\\cockpit-boot-smoke-after\\superset-home\\hooks\\copilot-hook.sh sessionStart",
+        "timeoutSec": 5
+      }
+    ],
+    "sessionEnd": [
+      {
+        "type": "command",
+        "bash": "C:\\Users\\levyt\\OneDrive\\Documents\\Software-Factory\\vendor\\superset-sh\\apps\\desktop\\runs\\wo-v0-deep-pass\\cockpit-boot-smoke-after\\superset-home\\hooks\\copilot-hook.sh sessionEnd",
+        "timeoutSec": 5
+      }
+    ],
+    "userPromptSubmitted": [
+      {
+        "type": "command",
+        "bash": "C:\\Users\\levyt\\OneDrive\\Documents\\Software-Factory\\vendor\\superset-sh\\apps\\desktop\\runs\\wo-v0-deep-pass\\cockpit-boot-smoke-after\\superset-home\\hooks\\copilot-hook.sh userPromptSubmitted",
+        "timeoutSec": 5
+      }
+    ],
+    "postToolUse": [
+      {
+        "type": "command",
+        "bash": "C:\\Users\\levyt\\OneDrive\\Documents\\Software-Factory\\vendor\\superset-sh\\apps\\desktop\\runs\\wo-v0-deep-pass\\cockpit-boot-smoke-after\\superset-home\\hooks\\copilot-hook.sh postToolUse",
+        "timeoutSec": 5
+      }
+    ]
+  }
+}' > "$COPILOT_HOOK_FILE" 2>/dev/null
+
+  if [ -d ".git/info" ]; then
+    grep -qF ".github/hooks/superset-notify.json" ".git/info/exclude" 2>/dev/null || \
+      printf '%s\n' ".github/hooks/superset-notify.json" >> ".git/info/exclude" 2>/dev/null
+  fi
+fi
+
+exec "$REAL_BIN" "$@"

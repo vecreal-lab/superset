@@ -1,5 +1,10 @@
 import { Check } from "lucide-react";
 import type { PipelineStage } from "lib/types/factory-operator-console";
+import {
+	StatusBadge,
+	type StatusBadgeVariant,
+} from "renderer/components/vecreal/StatusBadge";
+import { GateAdvancePulse } from "renderer/components/vecreal/GateAdvancePulse";
 import { PrimitiveIcon, cx, monoTextStyle } from "../common";
 
 export interface PipelineStripProps {
@@ -8,6 +13,17 @@ export interface PipelineStripProps {
 	layout?: "horizontal" | "vertical";
 	completedStageIds?: string[];
 	failedStageIds?: string[];
+}
+
+function statusVariantForStage(input: {
+	isCompleted: boolean;
+	isActive: boolean;
+	isFailed: boolean;
+}): StatusBadgeVariant {
+	if (input.isFailed) return "error";
+	if (input.isCompleted) return "success";
+	if (input.isActive) return "info";
+	return "neutral";
 }
 
 export function PipelineStrip({
@@ -43,6 +59,13 @@ export function PipelineStrip({
 					(activeIndex > -1 && index - 1 < activeIndex);
 				const isActive = stage.stageId === currentStageId;
 				const isFailed = failedStageIds.includes(stage.stageId);
+				const gateState = isFailed
+					? "failed"
+					: isCompleted
+						? "done"
+						: isActive
+							? "active"
+							: "pending";
 				return (
 					<li
 						key={stage.stageId}
@@ -98,7 +121,24 @@ export function PipelineStrip({
 						>
 							{isCompleted ? <PrimitiveIcon icon={Check} /> : index + 1}
 						</span>
-						<b style={{ fontWeight: 500 }}>{stage.label}</b>
+						<GateAdvancePulse state={gateState} label={stage.label} pulseOnMount>
+							<StatusBadge
+								variant={statusVariantForStage({ isCompleted, isActive, isFailed })}
+								size="sm"
+								isLive={isActive}
+								ariaLabel={`Pipeline stage ${stage.label}: ${
+									isFailed
+										? "failed"
+										: isCompleted
+											? "completed"
+											: isActive
+												? "active"
+												: "pending"
+								}`}
+							>
+								{stage.label}
+							</StatusBadge>
+						</GateAdvancePulse>
 					</li>
 				);
 			})}

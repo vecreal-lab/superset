@@ -34,6 +34,7 @@ Object.defineProperty(globalThis, "window", {
 		location: {
 			pathname: "/",
 			search: "",
+			hash: "",
 		},
 	},
 	writable: true,
@@ -48,6 +49,7 @@ const { createPersistentHashHistory } = await import(
 beforeEach(() => {
 	storage.clear();
 	mockReplaceState.mockClear();
+	window.location.hash = "";
 });
 
 afterEach(() => {
@@ -74,7 +76,7 @@ describe("createPersistentHashHistory", () => {
 			history.push("/a");
 			history.push("/b");
 			history.push("/c");
-			expect(history.length).toBe(4); // "/" + 3 pushes
+			expect(history.length).toBe(4); // "/factory" + 3 pushes
 
 			// Go back twice
 			history.back();
@@ -83,7 +85,7 @@ describe("createPersistentHashHistory", () => {
 
 			// Push new entry — should truncate /b, /c
 			history.push("/d");
-			expect(history.length).toBe(3); // "/", "/a", "/d"
+			expect(history.length).toBe(3); // "/factory", "/a", "/d"
 			expect(history.location.pathname).toBe("/d");
 		});
 	});
@@ -98,7 +100,7 @@ describe("createPersistentHashHistory", () => {
 			expect(history.location.pathname).toBe("/a");
 
 			history.back();
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 
 			history.forward();
 			expect(history.location.pathname).toBe("/a");
@@ -111,7 +113,7 @@ describe("createPersistentHashHistory", () => {
 			const history = createPersistentHashHistory();
 			history.back();
 			history.back();
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 
 		it("does not go past last entry", () => {
@@ -133,7 +135,7 @@ describe("createPersistentHashHistory", () => {
 			history.back();
 			history.back();
 			history.back();
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 
 			history.go(2);
 			expect(history.location.pathname).toBe("/b");
@@ -157,7 +159,7 @@ describe("createPersistentHashHistory", () => {
 			expect(history.location.pathname).toBe("/a");
 
 			history.go(-100);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 	});
 
@@ -169,7 +171,7 @@ describe("createPersistentHashHistory", () => {
 
 			history.replace("/b");
 			expect(history.location.pathname).toBe("/b");
-			expect(history.length).toBe(2); // "/" and "/b"
+			expect(history.length).toBe(2); // "/factory" and "/b"
 		});
 	});
 
@@ -193,7 +195,11 @@ describe("createPersistentHashHistory", () => {
 			history.push("/workspace/abc");
 
 			const stored = JSON.parse(storage.get("router-history") ?? "{}");
-			expect(stored.entries).toEqual(["/", "/tasks", "/workspace/abc"]);
+			expect(stored.entries).toEqual([
+				"/factory",
+				"/tasks",
+				"/workspace/abc",
+			]);
 			expect(stored.index).toBe(2);
 		});
 
@@ -211,17 +217,32 @@ describe("createPersistentHashHistory", () => {
 			expect(history.location.pathname).toBe("/tasks");
 		});
 
-		it("falls back to / when localStorage is empty", () => {
+		it("falls back to /factory when localStorage is empty", () => {
 			const history = createPersistentHashHistory();
 			expect(history.length).toBe(1);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 
 		it("handles corrupted localStorage gracefully", () => {
 			storage.set("router-history", "not-valid-json{{{");
 			const history = createPersistentHashHistory();
 			expect(history.length).toBe(1);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
+		});
+
+		it("uses the explicit launch hash before persisted history", () => {
+			storage.set(
+				"router-history",
+				JSON.stringify({
+					entries: ["/factory/design-system", "/workspace/abc"],
+					index: 0,
+				}),
+			);
+			window.location.hash = "#/factory";
+
+			const history = createPersistentHashHistory();
+			expect(history.length).toBe(1);
+			expect(history.location.pathname).toBe("/factory");
 		});
 	});
 
@@ -240,7 +261,7 @@ describe("createPersistentHashHistory", () => {
 		});
 
 		it("stores non-negative cappedIndex when current position is in the dropped portion", () => {
-			// Build 111 entries (index 0="/", 1-110="/page/N"), then navigate
+			// Build 111 entries (index 0="/factory", 1-110="/page/N"), then navigate
 			// back to index 5. At this point entries.length=111 and index=5.
 			// persistState caps to 100 entries, computing:
 			//   cappedIndex = 5 - (111 - 100) = -6
@@ -278,7 +299,7 @@ describe("createPersistentHashHistory", () => {
 
 			const history = createPersistentHashHistory();
 			expect(history.length).toBe(1);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 
 		it("falls back to / when entries contain null values", () => {
@@ -289,7 +310,7 @@ describe("createPersistentHashHistory", () => {
 
 			const history = createPersistentHashHistory();
 			expect(history.length).toBe(1);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 
 		it("falls back to / when entries contain empty strings", () => {
@@ -300,7 +321,7 @@ describe("createPersistentHashHistory", () => {
 
 			const history = createPersistentHashHistory();
 			expect(history.length).toBe(1);
-			expect(history.location.pathname).toBe("/");
+			expect(history.location.pathname).toBe("/factory");
 		});
 
 		it("accepts entries that are all valid non-empty strings", () => {
@@ -326,7 +347,7 @@ describe("createPersistentHashHistory", () => {
 
 			const entries = history.getEntries();
 			expect(entries.length).toBe(3);
-			expect(entries[0]?.path).toBe("/");
+			expect(entries[0]?.path).toBe("/factory");
 			expect(entries[1]?.path).toBe("/a");
 			expect(entries[2]?.path).toBe("/b");
 			expect(typeof entries[0]?.timestamp).toBe("number");
@@ -348,7 +369,7 @@ describe("createPersistentHashHistory", () => {
 			mockReplaceState.mockClear();
 
 			history.back();
-			expect(mockReplaceState).toHaveBeenCalledWith(null, "", "#/");
+			expect(mockReplaceState).toHaveBeenCalledWith(null, "", "#/factory");
 		});
 	});
 });

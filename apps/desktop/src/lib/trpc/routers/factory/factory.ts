@@ -6,27 +6,41 @@ import {
 import { z } from "zod";
 import { publicProcedure, router } from "../..";
 import { createFactoryCliRouter } from "./cli";
-import { createCoordinatorRouter } from "./coordinator";
+import { createFactoryAuditFindingsRouter } from "./auditFindings";
+import { createFactoryDecksRouter } from "./decks";
+import { createFactoryDesignRouter } from "./design";
 import { createDialogueRouter } from "./dialogue";
+import { createFactoryDesignSystemRouter } from "./designSystem";
 import { createFactoryBrandAtomsRouter } from "./brand-atoms";
 import { createFactoryDomainKnowledgeRouter } from "./domain-knowledge";
 import { createFactoryIntakeRouter } from "./intake";
 import { createFactoryLessonsRouter } from "./lessons";
+import { createFactorySettingsRouter } from "./settings";
 import { createFactoryStrategyPulseRouter } from "./strategy-pulse";
+import { createFactorySynthesisReceiptsRouter } from "./synthesisReceipts";
+import { createFactoryUiuxRouter } from "./uiux";
+import { createFactoryWorkOrdersRouter } from "./work-orders";
 
 const datasetSchema = z.enum(FACTORY_DATASETS);
 
 export const createFactoryRouter = () =>
 	router({
 		cli: createFactoryCliRouter(),
-		coordinator: createCoordinatorRouter(),
+		auditFindings: createFactoryAuditFindingsRouter(),
+		decks: createFactoryDecksRouter(),
+		design: createFactoryDesignRouter(),
+		designSystem: createFactoryDesignSystemRouter(),
 		dialogue: createDialogueRouter(),
 		factoryBrandAtoms: createFactoryBrandAtomsRouter(),
 		domainKnowledge: createFactoryDomainKnowledgeRouter(),
 		factoryIntake: createFactoryIntakeRouter(),
 		intake: createFactoryIntakeRouter(),
 		lessons: createFactoryLessonsRouter(),
+		settings: createFactorySettingsRouter(),
 		strategyPulse: createFactoryStrategyPulseRouter(),
+		synthesisReceipts: createFactorySynthesisReceiptsRouter(),
+		uiux: createFactoryUiuxRouter(),
+		workOrders: createFactoryWorkOrdersRouter(),
 		summary: publicProcedure.query(async () => {
 			return getFactoryReadModel().summary();
 		}),

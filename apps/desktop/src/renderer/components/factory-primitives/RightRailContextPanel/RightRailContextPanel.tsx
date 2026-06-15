@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
-import { ChevronRight, PanelRightClose, PanelRightOpen } from "lucide-react";
+import {
+	Check,
+	ChevronRight,
+	PanelRightClose,
+	PanelRightOpen,
+	X,
+} from "lucide-react";
 import type {
 	ArtifactReference,
 	RightRailItem,
 	RightRailState,
 	WorkOrderRunState,
 } from "lib/types/factory-operator-console";
+import { Card } from "renderer/components/vecreal/Card";
+import { StatusBadge } from "renderer/components/vecreal/StatusBadge";
 import { GateCard } from "../GateCard";
 import { MergePacket } from "../MergePacket";
 import { MockupApprovalGrid } from "../MockupApprovalGrid";
@@ -42,6 +50,20 @@ function badgeStateForRunStatus(
 	return status;
 }
 
+function pipelineStateForRunStage(
+	runState: NonNullable<RightRailItem["runState"]>,
+	index: number,
+): "pending" | "active" | "complete" | "failed" {
+	const currentIndex = runState.stages.findIndex(
+		(stage) => stage.stageId === runState.currentStageId,
+	);
+	const failedRun = runState.status === "failed";
+	if (failedRun && index === currentIndex) return "failed";
+	if (currentIndex > -1 && index < currentIndex) return "complete";
+	if (index === currentIndex) return "active";
+	return "pending";
+}
+
 const sectionHeadingStyle: CSSProperties = {
 	margin: 0,
 	textTransform: "uppercase",
@@ -62,24 +84,6 @@ const compactActionStyle: CSSProperties = {
 	lineHeight: 1.2,
 	overflowWrap: "anywhere",
 };
-
-function statusPillStyle(tone: "neutral" | "attention" | "success"): CSSProperties {
-	if (tone === "attention") {
-		return {
-			borderColor: "var(--accent)",
-			background: "var(--bg-soft)",
-			color: "var(--accent)",
-		};
-	}
-	if (tone === "success") {
-		return {
-			borderColor: "var(--success)",
-			background: "var(--bg-soft)",
-			color: "var(--success)",
-		};
-	}
-	return {};
-}
 
 function ProjectStatusStrip({ state }: { state: RightRailState }) {
 	const runningCount = groupItems(state.items, "running_work").length;
@@ -103,18 +107,19 @@ function ProjectStatusStrip({ state }: { state: RightRailState }) {
 		>
 			<h2 style={sectionHeadingStyle}>Project status</h2>
 			<div style={{ display: "flex", flexWrap: "wrap", gap: "var(--sp-2)" }}>
-				<span className="factory-chip" style={statusPillStyle("neutral")}>
+				<StatusBadge variant={runningCount > 0 ? "info" : "neutral"} size="sm">
 					{runningCount} WOs in flight
-				</span>
-				<span className="factory-chip" style={statusPillStyle("neutral")}>
+				</StatusBadge>
+				<StatusBadge variant={approvalCount > 0 ? "warning" : "neutral"} size="sm">
 					{approvalCount} approvals
-				</span>
-				<span
-					className="factory-chip"
-					style={statusPillStyle(attentionCount > 0 ? "attention" : "success")}
+				</StatusBadge>
+				<StatusBadge
+					variant={attentionCount > 0 ? "warning" : "success"}
+					size="sm"
+					isLive={attentionCount > 0}
 				>
 					{gateLabel}
-				</span>
+				</StatusBadge>
 			</div>
 		</section>
 	);
@@ -150,82 +155,130 @@ function RightRailCard({
 	onAcknowledgeItem?: (itemId: string) => void;
 }) {
 	return (
-		<article
+		<Card
+			as="article"
+			variant="compact"
 			className="factory-card"
 			style={{
 				...stackStyle,
-				gap: "var(--sp-4)",
+				gap: "var(--sp-2)",
 				minWidth: 0,
-				padding: "var(--sp-5)",
+				padding: "var(--sp-3)",
 				overflow: "hidden",
 			}}
-			data-rail-item-kind={item.kind}
 		>
-			<button
-				type="button"
-				onClick={() => onExpandItem?.(item.itemId)}
-				aria-expanded={item.expanded}
+			<header
 				style={{
 					display: "grid",
 					gridTemplateColumns: "minmax(0, 1fr) auto",
 					alignItems: "start",
 					gap: "var(--sp-3)",
-					width: "100%",
 					minWidth: 0,
-					padding: 0,
-					border: 0,
-					background: "transparent",
-					color: "inherit",
-					textAlign: "left",
-					cursor: "pointer",
 				}}
 			>
-				<span style={{ minWidth: 0 }}>
-					<strong style={{ display: "block", overflowWrap: "anywhere" }}>{item.title}</strong>
-					<span
+				<button
+					type="button"
+					onClick={() => onExpandItem?.(item.itemId)}
+					aria-expanded={item.expanded}
+					style={{
+						display: "grid",
+						gridTemplateColumns: "minmax(0, 1fr) auto",
+						alignItems: "start",
+						gap: "var(--sp-3)",
+						width: "100%",
+						minWidth: 0,
+						padding: 0,
+						border: 0,
+						background: "transparent",
+						color: "inherit",
+						textAlign: "left",
+						cursor: "pointer",
+					}}
+				>
+					<span style={{ minWidth: 0 }}>
+						<strong style={{ display: "block", overflowWrap: "anywhere" }}>
+							{item.title}
+						</strong>
+						<span
+							style={{
+								display: "block",
+								marginTop: "var(--sp-1)",
+								lineHeight: 1.35,
+								overflowWrap: "anywhere",
+								...mutedTextStyle,
+							}}
+						>
+							{item.summary}
+						</span>
+					</span>
+					<PrimitiveIcon
+						icon={ChevronRight}
 						style={{
-							display: "block",
-							marginTop: "var(--sp-2)",
-							lineHeight: 1.35,
-							overflowWrap: "anywhere",
-							...mutedTextStyle,
+							color: "var(--text-tertiary)",
+							transform: item.expanded ? "rotate(90deg)" : undefined,
+						}}
+					/>
+				</button>
+				<div
+					aria-label="Rail item actions"
+					style={{ display: "flex", gap: "var(--sp-1)" }}
+				>
+					{item.kind === "pending_action" || item.staleStateNotice ? (
+						<button
+							type="button"
+							className="factory-icon-button"
+							aria-label={`Acknowledge ${item.title}`}
+							title="Acknowledge"
+							onClick={() => onAcknowledgeItem?.(item.itemId)}
+							style={{
+								width: "var(--sp-8)",
+								minWidth: "var(--sp-8)",
+								height: "var(--sp-8)",
+								padding: 0,
+							}}
+						>
+							<PrimitiveIcon icon={Check} />
+						</button>
+					) : null}
+					<button
+						type="button"
+						className="factory-icon-button"
+						aria-label={`Dismiss ${item.title}`}
+						title={item.staleStateNotice ? "Mark reviewed" : "Dismiss"}
+						onClick={() => onAcknowledgeItem?.(item.itemId)}
+						style={{
+							width: "var(--sp-8)",
+							minWidth: "var(--sp-8)",
+							height: "var(--sp-8)",
+							padding: 0,
 						}}
 					>
-						{item.summary}
-					</span>
-				</span>
-				<PrimitiveIcon
-					icon={ChevronRight}
-					style={{
-						color: "var(--text-tertiary)",
-						transform: item.expanded ? "rotate(90deg)" : undefined,
-					}}
-				/>
-			</button>
+						<PrimitiveIcon icon={X} />
+					</button>
+				</div>
+			</header>
 			{item.expanded ? (
-				<div style={{ ...stackStyle, gap: "var(--sp-4)", minWidth: 0 }}>
+				<div style={{ ...stackStyle, gap: "var(--sp-3)", minWidth: 0 }}>
 					{item.gate ? (
 						<GateCard request={item.gate} onApprove={() => onApproveGate?.(item)} />
 					) : null}
 					{item.mockups ? <MockupApprovalGrid bundle={item.mockups} /> : null}
 					{item.mergePacket ? <MergePacket packet={item.mergePacket} /> : null}
 					{item.runState ? (
-						<div style={{ ...stackStyle, gap: "var(--sp-4)", minWidth: 0 }}>
+						<div style={{ ...stackStyle, gap: "var(--sp-3)", minWidth: 0 }}>
 							<RunStatusBadge state={badgeStateForRunStatus(item.runState.status)} />
 							<PipelineStrip
-								stages={item.runState.stages.map((stage) => ({
-									stageId: stage.stageId,
-									role: stage.stageName,
+								stages={item.runState.stages.map((stage, index) => ({
+									id: stage.stageId,
 									label: stage.stageName,
-									hasOwnerGate: false,
-									isParallelizable: false,
+									state: pipelineStateForRunStage(item.runState!, index),
 								}))}
-								currentStageId={item.runState.currentStageId}
+								ariaLabel="Run pipeline stages"
 							/>
 						</div>
 					) : null}
 					{item.staleStateNotice ? (
-						<div style={{ ...stackStyle, gap: "var(--sp-4)" }}>
+						<div style={{ ...stackStyle, gap: "var(--sp-3)" }}>
 							<StaleStateNotice notice={item.staleStateNotice} />
 							<p style={{ margin: 0, lineHeight: 1.4, ...mutedTextStyle }}>
 								Review the change summary, then either keep this in the rail or mark it
@@ -277,7 +330,7 @@ function RightRailCard({
 								}
 								onClick={() => {
 									if (isStaleFoundationReview(item, reference)) {
-										if (!item.expanded) onExpandItem?.(item.itemId);
+										onOpenReference?.(reference);
 										return;
 									}
 									onOpenReference?.(reference);
@@ -300,15 +353,15 @@ function RightRailCard({
 					))}
 				</div>
 			) : null}
-		</article>
+		</Card>
 	);
 }
 
 export function RightRailContextPanel({
 	state,
-	widthPx = 360,
+	widthPx = 340,
 	minWidthPx = 240,
-	maxWidthPx = 480,
+	maxWidthPx = 440,
 	onWidthChange,
 	onExpandItem,
 	onCollapse,
@@ -420,9 +473,9 @@ export function RightRailContextPanel({
 			<div
 				style={{
 					...stackStyle,
-					gap: "var(--sp-5)",
+					gap: "var(--sp-4)",
 					height: "100%",
-					padding: "var(--sp-6)",
+					padding: "var(--sp-4)",
 					overflow: "auto",
 				}}
 			>

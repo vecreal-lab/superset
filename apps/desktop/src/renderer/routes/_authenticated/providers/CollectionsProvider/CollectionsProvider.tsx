@@ -69,7 +69,41 @@ export function CollectionsProvider({ children }: { children: ReactNode }) {
 	);
 
 	if (!contextValue || isSwitching) {
-		return null;
+		return (
+			<div
+				role="status"
+				aria-live="polite"
+				data-provider-loading="collections"
+				style={{
+					display: "grid",
+					placeItems: "center",
+					width: "100vw",
+					height: "100vh",
+					padding: "var(--sp-8)",
+					background: "var(--bg-app)",
+					color: "var(--text-secondary)",
+				}}
+			>
+				<div
+					className="factory-card"
+					style={{
+						display: "grid",
+						gap: "var(--sp-3)",
+						maxWidth: "min(420px, 100%)",
+						padding: "var(--sp-6)",
+						textAlign: "center",
+					}}
+				>
+					<strong style={{ color: "var(--text-primary)" }}>
+						Preparing workspace collections
+					</strong>
+					<span>
+						The cockpit is loading organization-scoped data instead of rendering a
+						blank route.
+					</span>
+				</div>
+			</div>
+		);
 	}
 
 	return (

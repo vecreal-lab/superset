@@ -1,5 +1,8 @@
 import type { WorkOrderRunState } from "lib/types/factory-operator-console";
-import { cx, monoTextStyle } from "../common";
+import {
+	StatusBadge,
+	type StatusBadgeVariant,
+} from "renderer/components/vecreal/StatusBadge";
 
 export interface RunStatusBadgeProps {
 	state: WorkOrderRunState;
@@ -18,30 +21,27 @@ const statusLabels: Record<WorkOrderRunState, string> = {
 	canceled: "Canceled",
 };
 
-function statusColor(state: WorkOrderRunState): string {
-	if (state === "completed") return "var(--success)";
-	if (state === "failed" || state === "blocked") return "var(--error)";
-	if (state === "running" || state === "awaiting_approval") return "var(--accent)";
-	return "var(--text-tertiary)";
+function statusVariant(state: WorkOrderRunState): StatusBadgeVariant {
+	if (state === "completed") return "success";
+	if (state === "failed" || state === "blocked" || state === "canceled") return "error";
+	if (state === "awaiting_approval") return "warning";
+	if (state === "running") return "info";
+	return "neutral";
 }
 
 export function RunStatusBadge({ state, duration, className }: RunStatusBadgeProps) {
 	return (
-		<span
-			className={cx("factory-chip", className)}
-			style={{
-				...monoTextStyle,
-				color: statusColor(state),
-				borderColor: statusColor(state),
-				padding: "0 var(--sp-4)",
-				height: "var(--sp-10)",
-				fontSize: "var(--sp-5)",
-			}}
+		<StatusBadge
+			className={className}
+			variant={statusVariant(state)}
+			size="sm"
+			isLive={state === "running"}
+			ariaLabel={`Run status: ${statusLabels[state]}`}
 		>
 			{statusLabels[state]}
 			{typeof duration === "number" && (
 				<span style={{ color: "var(--text-tertiary)" }}>{Math.round(duration / 1000)}s</span>
 			)}
-		</span>
+		</StatusBadge>
 	);
 }

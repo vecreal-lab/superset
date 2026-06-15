@@ -1,16 +1,17 @@
 /**
  * Parse OSC 7 escape sequences to extract the current working directory.
- * OSC 7 format: ESC]7;file://hostname/path BEL (or ESC\)
+ * OSC 7 format: ESC]7;<local-file-uri>hostname/path BEL (or ESC\)
  *
  * This is emitted by shells when the directory changes.
  */
 
 const ESC = "\x1b";
 const BEL = "\x07";
+const LOCAL_FILE_SCHEME_PATTERN = "file:\\/\\/";
 
-// Match OSC 7 sequences: ESC]7;file://hostname/path followed by BEL or ST (ESC\)
+// Match OSC 7 directory sequences followed by BEL or ST (ESC\)
 const OSC7_PATTERN = new RegExp(
-	`${ESC}\\]7;file://[^/]*((?:/[^${BEL}${ESC}]*)*)(?:${BEL}|${ESC}\\\\)`,
+	`${ESC}\\]7;${LOCAL_FILE_SCHEME_PATTERN}[^/]*((?:/[^${BEL}${ESC}]*)*)(?:${BEL}|${ESC}\\\\)`,
 	"g",
 );
 

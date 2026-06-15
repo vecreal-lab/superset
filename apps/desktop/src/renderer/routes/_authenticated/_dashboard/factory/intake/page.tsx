@@ -9,11 +9,10 @@ import {
 	TableRow,
 } from "@superset/ui/table";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { ArrowDown, ArrowUp, Plus } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
+import { useMemo, type ReactNode } from "react";
 import { electronTrpc } from "renderer/lib/electron-trpc";
 import { useActiveProjectId } from "renderer/stores/active-project";
-import { IntakeComposer } from "../components/IntakeComposer";
 import {
 	EmptyFactoryState,
 	FactoryPage,
@@ -145,7 +144,6 @@ function IntakeListPage() {
 	const activeProjectId = useActiveProjectId();
 	const search = Route.useSearch();
 	const navigate = useNavigate();
-	const [composerOpen, setComposerOpen] = useState(false);
 	const intakeQuery = electronTrpc.factory.intake.list.useQuery(
 		{ include_propagated: true },
 		{ refetchInterval: 5000 },
@@ -248,15 +246,8 @@ function IntakeListPage() {
 	return (
 		<FactoryPage
 			title="Intake"
-			description="Cross-project Layer 2 intake queue for workshops, research notes, founder brain-dumps, customer pain, competitor news, and other upstream evidence."
-			actions={
-				<Button size="sm" onClick={() => setComposerOpen(true)}>
-					<Plus className="size-4" />
-					New intake
-				</Button>
-			}
+			description="Visual reader for captured Layer 2 intake artifacts. New intake capture now runs through Claude Desktop and factory-mcp."
 		>
-			<IntakeComposer open={composerOpen} onOpenChange={setComposerOpen} />
 			<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-6">
 				<div className="grid gap-3 lg:grid-cols-[minmax(0,1.2fr)_minmax(12rem,0.45fr)]">
 					<FactorySearch

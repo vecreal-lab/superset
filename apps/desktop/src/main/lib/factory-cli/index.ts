@@ -1,5 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export type FactoryCliProvider = "claude" | "codex";
@@ -9,12 +11,22 @@ export interface FactoryCliStatus {
 	label: string;
 	connected: boolean;
 	binaryOk: boolean;
+	authOk: boolean;
 	roundTripOk: boolean;
 	version?: string;
 	checkedAt: string;
 	message: string;
 	details?: string;
+	binaryPath?: string;
+	diagnostics: FactoryCliDiagnosticCheck[];
 	failureKind?: "binary_missing" | "auth" | "network" | "unknown";
+}
+
+export interface FactoryCliDiagnosticCheck {
+	label: string;
+	status: "pass" | "fail" | "info";
+	path?: string;
+	detail?: string;
 }
 
 export interface FactoryCliInvocationResult {
@@ -80,6 +92,10 @@ interface CommandResult {
 	stdout: string;
 	stderr: string;
 	timedOut: boolean;
+	resolvedCommand: string;
+	resolvedArgs: string[];
+	commandCandidates: string[];
+	resolvedVia: string;
 }
 
 const CLI_STATUS_TTL_MS = 5 * 60 * 1000;
@@ -225,7 +241,16 @@ async function runCommand(
 			if (settled) return;
 			settled = true;
 			clearTimeout(timeout);
-			resolve({ exitCode, stdout, stderr, timedOut });
+			resolve({
+				exitCode,
+				stdout,
+				stderr,
+				timedOut,
+				resolvedCommand: invocation.command,
+				resolvedArgs: invocation.args,
+				commandCandidates: invocation.candidates,
+				resolvedVia: invocation.resolvedVia,
+			});
 		};
 
 		const timeout = setTimeout(() => {
@@ -267,8 +292,10 @@ async function runCommand(
 function resolveCommandInvocation(
 	command: string,
 	args: string[],
-): { command: string; args: string[] } {
-	if (process.platform !== "win32") return { command, args };
+): { command: string; args: string[]; candidates: string[]; resolvedVia: string } {
+	if (process.platform !== "win32") {
+		return { command, args, candidates: [command], resolvedVia: "direct" };
+	}
 	const where = spawnSync("where.exe", [command], {
 		encoding: "utf8",
 		windowsHide: true,
@@ -282,21 +309,148 @@ function resolveCommandInvocation(
 	);
 	if (npmShim) {
 		const baseDir = path.dirname(npmShim);
-		const cliPath =
+		const cliPaths =
 			command === "claude"
-				? path.join(baseDir, "node_modules", "@anthropic-ai", "claude-code", "cli.js")
+				? [
+						path.join(
+							baseDir,
+							"node_modules",
+							"@anthropic-ai",
+							"claude-code",
+							"bin",
+							"claude.exe",
+						),
+						path.join(
+							baseDir,
+							"node_modules",
+							"@anthropic-ai",
+							"claude-code",
+							"bin",
+							"claude.js",
+						),
+						path.join(
+							baseDir,
+							"node_modules",
+							"@anthropic-ai",
+							"claude-code",
+							"cli.js",
+						),
+					]
 				: command === "codex"
-					? path.join(baseDir, "node_modules", "@openai", "codex", "bin", "codex.js")
-					: "";
-		if (cliPath && existsSync(cliPath)) {
-			return { command: "node", args: [cliPath, ...args] };
+					? [
+							path.join(
+								baseDir,
+								"node_modules",
+								"@openai",
+								"codex",
+								"bin",
+								"codex.js",
+							),
+						]
+					: [];
+		const cliPath = cliPaths.find((candidate) => existsSync(candidate));
+		if (cliPath) {
+			if (cliPath.toLowerCase().endsWith(".exe")) {
+				return {
+					command: cliPath,
+					args,
+					candidates,
+					resolvedVia: "npm global package",
+				};
+			}
+			return {
+				command: "node",
+				args: [cliPath, ...args],
+				candidates,
+				resolvedVia: "npm global package",
+			};
 		}
 	}
 	const executable = candidates.find((candidate) =>
 		candidate.toLowerCase().endsWith(".exe"),
 	);
-	if (executable) return { command: executable, args };
-	return { command, args };
+	if (executable) {
+		return { command: executable, args, candidates, resolvedVia: "windows executable" };
+	}
+	return { command, args, candidates, resolvedVia: "PATH fallback" };
+}
+
+function userPath(...segments: string[]): string {
+	return path.join(os.homedir(), ...segments);
+}
+
+function appDataPath(...segments: string[]): string | undefined {
+	const appData = process.env.APPDATA;
+	return appData ? path.join(appData, ...segments) : undefined;
+}
+
+async function fileCheck(
+	label: string,
+	filePath: string | undefined,
+): Promise<FactoryCliDiagnosticCheck> {
+	if (!filePath) {
+		return { label, status: "fail", detail: "Environment path unavailable." };
+	}
+	try {
+		const fileStat = await stat(filePath);
+		return {
+			label,
+			status: fileStat.size > 0 ? "pass" : "fail",
+			path: normalizeSlashes(filePath),
+			detail: fileStat.size > 0 ? `${fileStat.size} bytes` : "File is empty.",
+		};
+	} catch {
+		return {
+			label,
+			status: "fail",
+			path: normalizeSlashes(filePath),
+			detail: "File not found.",
+		};
+	}
+}
+
+async function authDiagnosticsForProvider(
+	provider: FactoryCliProvider,
+): Promise<{ authOk: boolean; diagnostics: FactoryCliDiagnosticCheck[] }> {
+	const diagnostics =
+		provider === "claude"
+			? await Promise.all([
+					fileCheck("Claude credentials", userPath(".claude", ".credentials.json")),
+					fileCheck("Claude desktop config", appDataPath("Claude", "config.json")),
+				])
+			: await Promise.all([
+					fileCheck("Codex auth", userPath(".codex", "auth.json")),
+					fileCheck("Codex capability session", userPath(".codex", "cap_sid")),
+				]);
+	return {
+		authOk: diagnostics.some((item) => item.status === "pass"),
+		diagnostics,
+	};
+}
+
+function versionDiagnostics(
+	result: CommandResult,
+	command: string,
+): FactoryCliDiagnosticCheck[] {
+	const binaryPath =
+		result.resolvedCommand === "node"
+			? result.resolvedArgs[0]
+			: result.resolvedCommand;
+	return [
+		{
+			label: `${command} binary`,
+			status: result.exitCode === 0 ? "pass" : "fail",
+			path: normalizeSlashes(binaryPath || command),
+			detail: `${result.resolvedVia}; ${result.commandCandidates.length} PATH candidate(s)`,
+		},
+		{
+			label: `${command} --version`,
+			status: result.exitCode === 0 ? "pass" : "fail",
+			detail:
+				`${result.stdout}${result.stderr}`.trim().split(/\r?\n/)[0] ||
+				(result.timedOut ? "Timed out." : "No version output."),
+		},
+	];
 }
 
 async function checkProvider(
@@ -314,75 +468,46 @@ async function checkProvider(
 		timeoutMs: 20_000,
 	});
 	const versionOutput = `${versionResult.stdout}${versionResult.stderr}`.trim();
-
-	if (versionResult.exitCode !== 0) {
-		const failureKind = classifyFailure(versionOutput);
-		const status: FactoryCliStatus = {
-			provider,
-			label,
-			connected: false,
-			binaryOk: false,
-			roundTripOk: false,
-			checkedAt: nowIso(),
-			message: statusFailureMessage(provider, failureKind),
-			details: versionOutput,
-			failureKind,
-		};
-		cachedStatuses.set(provider, { checkedAtMs: Date.now(), status });
-		return status;
-	}
-
-	const pingResult =
-		provider === "claude"
-			? await runCommand(
-					"claude",
-					[
-						"-p",
-						"--setting-sources",
-						"project,local",
-						"--output-format",
-						"json",
-						"--model",
-						CLAUDE_MODEL,
-						"--effort",
-						"max",
-					],
-					{ input: "respond OK", timeoutMs: HEALTH_TIMEOUT_MS },
-				)
-			: await runCommand(
-					"codex",
-					[
-						"exec",
-						"-m",
-						CODEX_MODEL,
-						"-c",
-						'model_reasoning_effort="xhigh"',
-						"-c",
-						'model_reasoning_summary="detailed"',
-						"--sandbox",
-						"read-only",
-						"--skip-git-repo-check",
-						"-",
-					],
-					{ input: "respond exactly OK", timeoutMs: HEALTH_TIMEOUT_MS },
-				);
-	const pingOutput = `${pingResult.stdout}\n${pingResult.stderr}`.trim();
-	const roundTripOk = pingResult.exitCode === 0 && /\bOK\b/.test(pingOutput);
-	const failureKind = roundTripOk ? undefined : classifyFailure(pingOutput);
+	const auth = await authDiagnosticsForProvider(provider);
+	const binaryOk = versionResult.exitCode === 0;
+	const binaryPath =
+		versionResult.resolvedCommand === "node"
+			? versionResult.resolvedArgs[0]
+			: versionResult.resolvedCommand;
+	const failureKind = !binaryOk
+		? classifyFailure(versionOutput)
+		: auth.authOk
+			? undefined
+			: "auth";
+	const diagnostics: FactoryCliDiagnosticCheck[] = [
+		...versionDiagnostics(versionResult, command),
+		...auth.diagnostics,
+		{
+			label: "Interactive round-trip",
+			status: "info",
+			detail:
+				"Skipped for status polling; invocation paths still perform real CLI calls.",
+		},
+	];
 	const status: FactoryCliStatus = {
 		provider,
 		label,
-		connected: roundTripOk,
-		binaryOk: true,
-		roundTripOk,
+		connected: binaryOk && auth.authOk,
+		binaryOk,
+		authOk: auth.authOk,
+		roundTripOk: binaryOk && auth.authOk,
 		version: versionOutput.split(/\r?\n/)[0],
 		checkedAt: nowIso(),
-		message: roundTripOk
+		message: binaryOk && auth.authOk
 			? `${label} connected`
 			: statusFailureMessage(provider, failureKind),
-		details: roundTripOk
-			? normalizeSlashes(versionOutput)
-			: normalizeSlashes(pingOutput),
+		details: diagnostics
+			.map((item) =>
+				`${item.status.toUpperCase()} ${item.label}${item.path ? `: ${item.path}` : ""}${item.detail ? ` (${item.detail})` : ""}`,
+			)
+			.join("\n"),
+		binaryPath: normalizeSlashes(binaryPath || command),
+		diagnostics,
 		failureKind,
 	};
 	cachedStatuses.set(provider, { checkedAtMs: Date.now(), status });

@@ -1,5 +1,5 @@
 import { ChevronDown } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { WorkspaceContext } from "lib/types/factory-operator-console";
 import { PrimitiveIcon, mutedTextStyle, stackStyle } from "../common";
 
@@ -68,9 +68,27 @@ export function ProjectSwitcher({
 	onSwitch,
 }: ProjectSwitcherProps) {
 	const [open, setOpen] = useState(false);
+	const rootRef = useRef<HTMLDivElement | null>(null);
 	const current = findProject(projectTree, currentProjectId) || projectTree[0];
+
+	useEffect(() => {
+		if (!open) return undefined;
+		const onPointerDown = (event: PointerEvent) => {
+			if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+		};
+		const onKeyDown = (event: KeyboardEvent) => {
+			if (event.key === "Escape") setOpen(false);
+		};
+		window.addEventListener("pointerdown", onPointerDown);
+		window.addEventListener("keydown", onKeyDown);
+		return () => {
+			window.removeEventListener("pointerdown", onPointerDown);
+			window.removeEventListener("keydown", onKeyDown);
+		};
+	}, [open]);
+
 	return (
-		<div style={{ position: "relative" }}>
+		<div ref={rootRef} style={{ position: "relative" }}>
 			<button
 				type="button"
 				className="factory-project-switcher"
@@ -80,7 +98,13 @@ export function ProjectSwitcher({
 				data-workspace-id={workspace?.workspaceId}
 			>
 				<span>{current?.name || "Software Factory"}</span>
-				<PrimitiveIcon icon={ChevronDown} />
+				<PrimitiveIcon
+					icon={ChevronDown}
+					style={{
+						transform: open ? "rotate(180deg)" : undefined,
+						transition: "transform var(--motion-fast) var(--ease-out)",
+					}}
+				/>
 			</button>
 			{open && (
 				<div

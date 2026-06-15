@@ -13,6 +13,7 @@ import { DndProvider } from "react-dnd";
 import { HiOutlineWifi } from "react-icons/hi2";
 import { NewWorkspaceModal } from "renderer/components/NewWorkspaceModal";
 import { Paywall } from "renderer/components/Paywall";
+import { RouteErrorBoundary } from "renderer/components/factory-primitives/RouteErrorBoundary";
 import { useUpdateListener } from "renderer/components/UpdateToast";
 import { env } from "renderer/env.renderer";
 import { useIsV2CloudEnabled } from "renderer/hooks/useIsV2CloudEnabled";
@@ -210,7 +211,9 @@ function AuthenticatedLayout() {
 						>
 							<AgentHooks />
 							<V2NotificationController />
-							<Outlet />
+							<RouteErrorBoundary routePath={location.pathname}>
+								<Outlet />
+							</RouteErrorBoundary>
 							<V1MigrationSummaryModal />
 							<WorkspaceInitEffects />
 							{isV2CloudEnabled ? (

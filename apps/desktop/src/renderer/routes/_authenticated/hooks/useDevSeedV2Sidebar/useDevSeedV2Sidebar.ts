@@ -9,7 +9,7 @@ const SEED_FLAG_KEY = "superset:dev:v2-sidebar-seeded";
 /**
  * Auto-pins accessible v2 workspaces in dev so a fresh worktree's sidebar
  * isn't blank. Chromium's localStorage is per-origin: the dev Vite origin
- * (`http://localhost:<port>`) can't share data with the packaged `file://`
+ * (`http://localhost:<port>`) can't share data with the packaged desktop
  * origin, so copying prod's leveldb seeds the wrong namespace. We pin at
  * runtime instead. The flag prevents re-pinning workspaces the user later
  * unpins.

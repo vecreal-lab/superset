@@ -16,6 +16,11 @@ Use `authBypassEnabled` for every org/auth bypass condition. Do not check only
 `env.SKIP_ENV_VALIDATION`; that flag is development-only and does not cover the
 factory's production local-only path.
 
+`.superset/setup.sh`, `.superset/teardown.sh`, and
+`.superset/hooks/notify.sh` are no-op stubs in `FACTORY_LOCAL_ONLY` mode.
+Software Factory does not use upstream Superset cloud setup/teardown
+infrastructure.
+
 Known local-only boot/auth entry points:
 
 - `src/renderer/routes/_authenticated/layout.tsx`
@@ -42,6 +47,52 @@ required context value is missing can make the entire authenticated app render
 nothing with no visible error or log. In FACTORY_LOCAL_ONLY mode, always grep
 providers for `return null` and verify their org/auth context can resolve from
 the local-only bypass.
+
+## Cockpit stability rules
+
+Packaged cockpit routes must not rely on the browser's local file origin.
+The main process registers the `factory://` custom protocol before any window
+opens. Packaged renderer HTML is loaded from `factory://app/index.html#/`, and
+repository artifacts that must be shown as resources should use `factory://`
+URLs resolved by the main-process handler. Do not construct local file-resource
+URLs in renderer code. Use route/hash navigation, tRPC document reads, `srcDoc`,
+blob/data URLs, or `renderer/lib/factory-protocol-url.ts` as appropriate.
+
+Every cockpit-touching WO must run the boot smoke after `compile:app`:
+
+```bash
+bun run --cwd vendor/superset-sh test:cockpit-boot
+```
+
+`test:cockpit-boot` is single-instance. Do not run it concurrently across
+multiple Codex windows; serialize boot smoke verification when Codex runs in
+parallel. Concurrent runs trigger the Electron single-instance lock plus Bun 255
+or debug-endpoint-not-open flakes. This is not a harness bug, but a usage
+limitation.
+
+The smoke boots Electron in `FACTORY_LOCAL_ONLY=true`, walks registered concrete
+routes, verifies each route renders non-blank, captures screenshots under
+`runs/wo-cs/cockpit-boot-smoke/`, and fails on route error boundaries or blocked
+local-resource console messages.
+
+Every authenticated route inherits `RouteErrorBoundary` from
+`_authenticated/layout.tsx` and `_authenticated/_dashboard/layout.tsx`. Do not
+remove that boundary when changing route layouts. Route failures must show the
+operator a readable route, message, refresh action, and report action rather
+than leaving a blank cockpit.
+
+Provider edits under `_authenticated/providers/**` require a receipt
+`provider_null_return_audit`: grep for `return null`, then verify each provider
+can resolve required auth/org context in `FACTORY_LOCAL_ONLY=true`.
+
+## Local git hook discipline
+
+Do not let Superset local notification hooks spawn interactive shells during
+Software Factory work. The repo-local `.superset/hooks/notify.sh` hook is a
+no-op for this workspace, exports `GIT_TERMINAL_PROMPT=0`, redirects stdin/stdout/
+stderr to null, and exits successfully. If a future setup step reinstalls that
+hook, preserve the non-interactive behavior so parallel Codex git operations do
+not open stray `/usr/bin/bash --login` windows.
 
 ## tRPC Subscriptions (trpc-electron)
 

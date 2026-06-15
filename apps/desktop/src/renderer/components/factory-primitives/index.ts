@@ -13,3 +13,4 @@ export * from "./MergePacket";
 export * from "./CoordinatorSurface";
 export * from "./RightRailContextPanel";
 export * from "./EntityMentionLink";
+export * from "./RouteErrorBoundary";

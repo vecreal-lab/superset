@@ -163,6 +163,17 @@
 		-webkit-font-smoothing: antialiased;
 	}
 
+	.factory-selectable,
+	.factory-selectable * {
+		user-select: text;
+		-webkit-user-select: text;
+		cursor: text;
+	}
+
+	.factory-message-markdown > :last-child {
+		margin-bottom: 0 !important;
+	}
+
 	/* Ensure the React root fills the viewport and provides a positioning context */
 	/* biome-ignore lint/correctness/noUnknownTypeSelector: app is a custom element in index.html */
 	app {

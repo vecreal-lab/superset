@@ -384,53 +384,16 @@ export function getCodexGlobalHooksJsonContent(
 		existing.hooks[eventName] = filtered;
 	}
 
-	const managedEvents: Array<{
-		eventName: "SessionStart" | "UserPromptSubmit" | "Stop";
-		definition: ClaudeHookDefinition;
-	}> = [
-		{
-			eventName: "SessionStart",
-			definition: {
-				hooks: [{ type: "command", command: notifyScriptPath }],
-			},
-		},
-		{
-			eventName: "UserPromptSubmit",
-			definition: {
-				hooks: [{ type: "command", command: notifyScriptPath }],
-			},
-		},
-		{
-			eventName: "Stop",
-			definition: {
-				hooks: [{ type: "command", command: notifyScriptPath }],
-			},
-		},
-	];
-
-	for (const { eventName, definition } of managedEvents) {
-		const current = existing.hooks[eventName];
-		if (Array.isArray(current)) {
-			current.push(definition);
-			existing.hooks[eventName] = current;
-		} else {
-			existing.hooks[eventName] = [definition];
-		}
-	}
-
 	return JSON.stringify(existing, null, 2);
 }
 
 /**
- * Writes Superset hook definitions directly into ~/.codex/hooks.json.
- * This provides a fallback notification path that works even when the
- * binary wrapper is not in PATH (e.g. user runs codex from outside
- * a Superset terminal).
+ * Removes Superset hook definitions from ~/.codex/hooks.json.
  *
- * The wrapper still injects Codex's native notify callback and keeps the
- * session-log watcher as a best-effort bridge for older releases, but the
- * native hooks.json registration is now the primary source for prompt/tool
- * lifecycle events.
+ * Windows resolves bare .sh hook commands through Git Bash, which opens
+ * persistent interactive windows for Codex lifecycle hooks. The Codex desktop
+ * app already has its own completion notifier, so Software Factory local runs
+ * must not register global Codex SessionStart/UserPromptSubmit hooks.
  */
 export function createCodexHooksJson(): void {
 	const notifyScriptPath = getNotifyScriptPath();
@@ -442,7 +405,7 @@ export function createCodexHooksJson(): void {
 	fs.mkdirSync(dir, { recursive: true });
 	const changed = writeFileIfChanged(globalPath, content, 0o644);
 	console.log(
-		`[agent-setup] ${changed ? "Updated" : "Verified"} Codex hooks.json`,
+		`[agent-setup] ${changed ? "Pruned" : "Verified"} Codex hooks.json`,
 	);
 }
 

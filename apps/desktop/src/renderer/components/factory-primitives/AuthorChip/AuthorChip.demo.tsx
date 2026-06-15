@@ -1,23 +1,10 @@
-import { AuthorChip } from "./AuthorChip";
-
-const operator = {
-	user: "yuriy",
-	isAgent: false,
-	displayName: "Yuriy",
-};
-
-const agent = {
-	user: "agent",
-	role: "PROJECT_COORDINATOR",
-	isAgent: true,
-	displayName: "Project Coordinator",
-};
+import { AuthorChip } from ".";
 
 export function AuthorChipDemo() {
 	return (
 		<div style={{ display: "flex", gap: "var(--sp-6)", alignItems: "center" }}>
-			<AuthorChip attribution={operator} />
-			<AuthorChip attribution={agent} size="md" variant="card-header" />
+			<AuthorChip name="Yuriy" kind="human" />
+			<AuthorChip name="Project Coordinator" kind="agent" role="PC" showRole size="md" />
 		</div>
 	);
 }

@@ -42,6 +42,17 @@ const handleDeepLink = (path: string) => {
 	console.log("[deep-link] Navigating to:", path);
 	router.navigate({ to: path });
 };
+
+function resolveCockpitBootRoute(path: string): string {
+	if (path === "/automations") return "/v2-workspaces";
+	return path;
+}
+
+Object.defineProperty(window, "__cockpitBootNavigate", {
+	configurable: true,
+	value: (path: string) => router.navigate({ to: resolveCockpitBootRoute(path) }),
+});
+
 const ipcRenderer = window.ipcRenderer as typeof window.ipcRenderer | undefined;
 if (ipcRenderer) {
 	ipcRenderer.on("deep-link-navigate", handleDeepLink);

@@ -254,6 +254,7 @@ export interface DialogueTurn {
 }
 
 export type CoordinatorToolKind =
+	| "spawn_deck"
 	| "spawn_wo"
 	| "run_wo"
 	| "approve_gate"
@@ -438,6 +439,8 @@ export type ArtifactReferenceKind =
 	| "project"
 	| "intake"
 	| "receipt"
+	| "deck"
+	| "slide"
 	| "other";
 
 export interface ArtifactReference {
@@ -449,6 +452,126 @@ export interface ArtifactReference {
 	route?: string;
 	sourceSection?: string;
 	summary?: string;
+}
+
+export type DeckLifecycleState =
+	| "draft"
+	| "generation_requested"
+	| "in_review"
+	| "revision_requested"
+	| "approved"
+	| "export_ready";
+
+export type DeckSlideApprovalState =
+	| "draft"
+	| "needs_revision"
+	| "review_passed"
+	| "approved";
+
+export type DeckExportFormat = "html" | "pdf";
+
+export type DeckExportStatus =
+	| "not_requested"
+	| "ready"
+	| "browser_print_required"
+	| "failed";
+
+export interface DeckCommentTarget {
+	targetId: string;
+	label: string;
+	line: number;
+	column: number;
+	hint?: string;
+}
+
+export interface DeckSlideSummary {
+	slideId: string;
+	index: number;
+	title: string;
+	summary: string;
+	approvalState: DeckSlideApprovalState;
+	previewHtml?: string;
+	commentTargets: DeckCommentTarget[];
+	updatedAt: string;
+}
+
+export interface DeckApprovalState {
+	deck: "draft" | "pending_operator" | "approved";
+	slides: Record<string, DeckSlideApprovalState>;
+	finalGate?: GateRequest;
+	approvedBy?: AuthorAttribution;
+	approvedAt?: string;
+}
+
+export interface DeckExportRecord {
+	format: DeckExportFormat;
+	status: DeckExportStatus;
+	path?: string;
+	requestedAt: string;
+	completedAt?: string;
+	summary: string;
+}
+
+export interface DeckSummary {
+	deckId: string;
+	projectId: string;
+	title: string;
+	scope: string;
+	audience: string;
+	status: DeckLifecycleState;
+	ownerPath: string;
+	dialoguePath: string;
+	slideCount: number;
+	updatedAt: string;
+	approvalState: DeckApprovalState;
+	exportRecords: DeckExportRecord[];
+}
+
+export interface DeckDetail extends DeckSummary {
+	slides: DeckSlideSummary[];
+	revisionEvents: DeckRevisionEvent[];
+	references: ArtifactReference[];
+	authorRole: "DECK_AUTHOR";
+	reviewerRole: "DECK_REVIEWER";
+}
+
+export interface DeckRevisionComment {
+	commentId?: string;
+	text: string;
+	line: number;
+	column: number;
+	targetLabel?: string;
+	hint?: string;
+}
+
+export interface DeckRevisionEvent {
+	eventId: string;
+	type:
+		| "deck_spawn_requested"
+		| "author_dispatch_requested"
+		| "reviewer_dispatch_requested"
+		| "slide_comment_added"
+		| "revision_requested"
+		| "slide_approved"
+		| "deck_approved"
+		| "export_requested"
+		| "export_completed"
+		| "export_gap_carried_forward";
+	projectId: string;
+	deckId: string;
+	slideId?: string;
+	summary: string;
+	comment?: DeckRevisionComment;
+	markerId?: string;
+	sourcePath?: string;
+	createdAt: string;
+	references: ArtifactReference[];
+}
+
+export interface DeckProgressEvent {
+	type: "snapshot" | "event";
+	deck?: DeckDetail;
+	event?: DeckRevisionEvent;
 }
 
 export type CoordinatorRole = "PROJECT_COORDINATOR" | "UIUX_COORDINATOR";

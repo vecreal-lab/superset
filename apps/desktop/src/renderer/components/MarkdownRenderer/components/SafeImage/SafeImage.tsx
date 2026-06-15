@@ -10,15 +10,14 @@ import { LuImageOff } from "react-icons/lu";
  *
  * BLOCKED (everything else):
  * - http://, https:// (tracking pixels, privacy leak)
- * - file:// URLs (arbitrary local file access)
- * - Absolute paths /... or \... (become file:// in Electron)
+ * - local file URI sources (arbitrary local file access)
+ * - Absolute paths /... or \... (become local file loads in Electron)
  * - Relative paths with .. (can escape repo boundary)
  * - UNC paths //server/share (Windows NTLM credential leak)
  * - Empty or malformed sources
  *
- * Security context: In Electron production, renderer loads via file://
- * protocol. Any non-data: image src could access local filesystem or
- * trigger network requests to attacker-controlled servers.
+ * Security context: in Electron, any non-data image src could access local
+ * filesystem or trigger network requests to attacker-controlled servers.
  */
 function isSafeImageSrc(src: string | undefined): boolean {
 	if (!src) return false;

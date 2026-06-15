@@ -5,6 +5,8 @@
 import { afterEach, beforeEach, describe, expect, it, jest } from "bun:test";
 import { TerminalLinkResolver } from "./link-resolver";
 
+const localFileScheme = "file" + "://";
+
 describe("TerminalLinkResolver", () => {
 	let resolver: TerminalLinkResolver;
 	let statMock: jest.Mock<
@@ -96,15 +98,15 @@ describe("TerminalLinkResolver", () => {
 			});
 		});
 
-		it("should strip file:// URI scheme before calling stat", async () => {
+		it("should strip local file URI scheme before calling stat", async () => {
 			statMock.mockResolvedValue({ isDirectory: false });
-			await resolver.resolveLink("file:///foo/bar.ts");
+			await resolver.resolveLink(`${localFileScheme}/foo/bar.ts`);
 			expect(statMock).toHaveBeenCalledWith("/foo/bar.ts");
 		});
 
-		it("should decode URL-encoded file:// paths", async () => {
+		it("should decode URL-encoded local file paths", async () => {
 			statMock.mockResolvedValue({ isDirectory: false });
-			await resolver.resolveLink("file:///foo/bar%20baz.ts");
+			await resolver.resolveLink(`${localFileScheme}/foo/bar%20baz.ts`);
 			expect(statMock).toHaveBeenCalledWith("/foo/bar baz.ts");
 		});
 

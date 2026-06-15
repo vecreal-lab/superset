@@ -34,6 +34,8 @@ interface FactoryWorkspaceStoreState {
 	activeCoordinatorMode: CoordinatorMode;
 	activeReferenceIds: string[];
 	draftComposerTextByProject: Record<string, string>;
+	activeDeckIdByProject: Record<string, string | undefined>;
+	deckCommentDraftByKey: Record<string, string>;
 	themeMode: FactoryThemeMode;
 	reducedMotion: boolean;
 	density: FactoryDensityMode;
@@ -50,6 +52,13 @@ interface FactoryWorkspaceStoreState {
 	setActiveCoordinatorMode: (mode: CoordinatorMode) => void;
 	setActiveReferences: (references: ArtifactReference[]) => void;
 	setDraftComposerText: (projectId: string, text: string) => void;
+	setActiveDeckId: (projectId: string, deckId?: string) => void;
+	setDeckCommentDraft: (
+		projectId: string,
+		deckId: string,
+		slideId: string,
+		text: string,
+	) => void;
 	setThemeMode: (mode: FactoryThemeMode) => void;
 	setReducedMotion: (reducedMotion: boolean) => void;
 	setDensity: (density: FactoryDensityMode) => void;
@@ -103,6 +112,8 @@ export const useFactoryWorkspaceStore = create<FactoryWorkspaceStoreState>()(
 				activeCoordinatorMode: "general",
 				activeReferenceIds: [],
 				draftComposerTextByProject: {},
+				activeDeckIdByProject: {},
+				deckCommentDraftByKey: {},
 				themeMode: "dark",
 				reducedMotion: false,
 				density: "compact",
@@ -164,6 +175,20 @@ export const useFactoryWorkspaceStore = create<FactoryWorkspaceStoreState>()(
 							[projectId]: text,
 						},
 					})),
+				setActiveDeckId: (projectId, deckId) =>
+					set((state) => ({
+						activeDeckIdByProject: {
+							...state.activeDeckIdByProject,
+							[projectId]: deckId,
+						},
+					})),
+				setDeckCommentDraft: (projectId, deckId, slideId, text) =>
+					set((state) => ({
+						deckCommentDraftByKey: {
+							...state.deckCommentDraftByKey,
+							[`${projectId}:${deckId}:${slideId}`]: text,
+						},
+					})),
 				setThemeMode: (themeMode) => set({ themeMode }),
 				setReducedMotion: (reducedMotion) => set({ reducedMotion }),
 				setDensity: (density) => set({ density }),
@@ -188,6 +213,8 @@ export const useFactoryWorkspaceStore = create<FactoryWorkspaceStoreState>()(
 					activeCoordinatorMode: state.activeCoordinatorMode,
 					activeReferenceIds: state.activeReferenceIds,
 					draftComposerTextByProject: state.draftComposerTextByProject,
+					activeDeckIdByProject: state.activeDeckIdByProject,
+					deckCommentDraftByKey: state.deckCommentDraftByKey,
 					themeMode: state.themeMode,
 					reducedMotion: state.reducedMotion,
 					density: state.density,

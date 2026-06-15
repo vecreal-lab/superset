@@ -8,6 +8,7 @@ import type {
 } from "lib/types/factory-operator-console";
 
 export const COORDINATOR_TOOL_KINDS = [
+	"spawn_deck",
 	"spawn_wo",
 	"run_wo",
 	"approve_gate",
@@ -66,6 +67,7 @@ export interface CreateCoordinatorToolCallInput {
 }
 
 const HIGH_STAKES_TOOL_KINDS = new Set<CoordinatorToolKind>([
+	"spawn_deck",
 	"spawn_wo",
 	"run_wo",
 	"approve_gate",
@@ -149,6 +151,8 @@ export function createRightRailItemForToolCall(
 
 export function labelForToolKind(kind: CoordinatorToolKind): string {
 	switch (kind) {
+		case "spawn_deck":
+			return "Spawn pitch deck";
 		case "spawn_wo":
 			return "Spawn work order";
 		case "run_wo":
@@ -186,6 +190,14 @@ export function inferToolKindFromMessage(
 	message: string,
 ): CoordinatorToolKind | undefined {
 	const normalized = message.toLowerCase();
+	if (
+		/\b(spawn|create|generate|author)\b.*\b(pitch deck|slide deck|deck)\b/.test(
+			normalized,
+		) ||
+		/\bdeck\b.*\b(deep review|author|reviewer|slides?)\b/.test(normalized)
+	) {
+		return "spawn_deck";
+	}
 	if (/\bspawn\b.*\bwo\b|\bcreate\b.*\bwork order\b/.test(normalized)) {
 		return "spawn_wo";
 	}

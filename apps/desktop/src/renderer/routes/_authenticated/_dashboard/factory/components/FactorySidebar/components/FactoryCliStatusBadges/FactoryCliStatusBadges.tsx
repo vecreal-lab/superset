@@ -21,7 +21,7 @@ export function FactoryCliStatusBadges() {
 			await utils.factory.cli.status.invalidate();
 		},
 	});
-	const statuses = statusQuery.data || [];
+	const statuses = reconnect.data || statusQuery.data || [];
 
 	return (
 		<div className="mt-3 space-y-1.5">
@@ -61,6 +61,50 @@ export function FactoryCliStatusBadges() {
 								{status?.version && (
 									<div className="mt-1 text-muted-foreground">{status.version}</div>
 								)}
+								{status?.binaryPath && (
+									<div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+										{status.binaryPath}
+									</div>
+								)}
+								{status?.diagnostics?.length ? (
+									<div className="mt-2 space-y-1">
+										{status.diagnostics.map((item) => (
+											<div
+												key={`${provider}-${item.label}-${item.path || item.detail || ""}`}
+												className="grid grid-cols-[auto_minmax(0,1fr)] gap-1.5"
+											>
+												<Badge
+													variant="outline"
+													className="h-4 px-1 text-[9px]"
+													style={{
+														borderColor:
+															item.status === "pass"
+																? "var(--success)"
+																: item.status === "fail"
+																	? "var(--error)"
+																	: "var(--border)",
+														color:
+															item.status === "pass"
+																? "var(--success)"
+																: item.status === "fail"
+																	? "var(--error)"
+																	: "var(--text-muted)",
+													}}
+												>
+													{item.status}
+												</Badge>
+												<div className="min-w-0">
+													<div className="truncate text-foreground">{item.label}</div>
+													{item.path || item.detail ? (
+														<div className="truncate font-mono text-[10px] text-muted-foreground">
+															{item.path || item.detail}
+														</div>
+													) : null}
+												</div>
+											</div>
+										))}
+									</div>
+								) : null}
 								{status?.details && !status.connected && (
 									<pre className="mt-2 max-h-24 overflow-auto whitespace-pre-wrap rounded bg-muted p-2 text-[10px]">
 										{status.details}
@@ -80,7 +124,7 @@ export function FactoryCliStatusBadges() {
 									onClick={() => reconnect.mutate({ force: true })}
 								>
 									<RotateCcw className="size-3.5" />
-									Reconnect
+									{reconnect.isPending ? "Checking..." : "Reconnect"}
 								</Button>
 							</div>
 						)}

@@ -1,0 +1,23 @@
+{
+  "tabsState": {
+    "tabs": [],
+    "panes": {},
+    "activeTabIds": {},
+    "focusedPaneIds": {},
+    "tabHistoryStacks": {}
+  },
+  "themeState": {
+    "activeThemeId": "dark",
+    "customThemes": [],
+    "systemLightThemeId": "light",
+    "systemDarkThemeId": "dark"
+  },
+  "hotkeysState": {
+    "version": 1,
+    "byPlatform": {
+      "darwin": {},
+      "win32": {},
+      "linux": {}
+    }
+  }
+}

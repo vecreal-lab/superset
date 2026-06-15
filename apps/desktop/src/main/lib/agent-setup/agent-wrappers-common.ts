@@ -10,7 +10,13 @@ export { SUPERSET_MANAGED_BINARIES };
 // $PWD/superset-dev-data — without a leading dot — so we must recognize that
 // variant to reap stale notify.sh paths from deleted worktrees.
 const SUPERSET_MANAGED_HOOK_PATH_PATTERN =
-	/\/(?:\.superset(?:-[^/'"\s\\]+)?|superset-dev-data)\//;
+	/\/(?:\.superset(?:-[^/'"\s\\]+)?|superset-dev-data|superset-home(?:-[^/'"\s\\]+)?|manual-home(?:-[^/'"\s\\]+)?)\//;
+
+const SUPERSET_TEMP_HOME_NOTIFY_HOOK_PATTERN =
+	/\/AppData\/Local\/Temp\/[^/'"\s]+\/home\/hooks\/notify\.sh(?:$|["'\s])/i;
+
+const SUPERSET_COCKPIT_SMOKE_NOTIFY_HOOK_PATTERN =
+	/\/runs\/wo-cs\/cockpit-boot-smoke\/(?:manual-home|superset-home)\/hooks\/notify\.sh(?:$|["'\s])/i;
 
 export function writeFileIfChanged(
 	filePath: string,
@@ -40,7 +46,11 @@ export function isSupersetManagedHookCommand(
 	if (!command) return false;
 	const normalized = command.replaceAll("\\", "/");
 	if (!normalized.includes(`/hooks/${scriptName}`)) return false;
-	return SUPERSET_MANAGED_HOOK_PATH_PATTERN.test(normalized);
+	return (
+		SUPERSET_MANAGED_HOOK_PATH_PATTERN.test(normalized) ||
+		SUPERSET_TEMP_HOME_NOTIFY_HOOK_PATTERN.test(normalized) ||
+		SUPERSET_COCKPIT_SMOKE_NOTIFY_HOOK_PATTERN.test(normalized)
+	);
 }
 
 interface ReconcileManagedEntriesOptions<T> {

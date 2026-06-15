@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
@@ -444,8 +444,11 @@ export class FactoryBrandAtomsStore {
 	}
 
 	private projectsRoot() {
-		const candidate = this.workspaceContext?.projectsRoot
-			? path.resolve(this.workspaceContext.projectsRoot)
+		const configuredProjectsRoot = this.workspaceContext?.projectsRoot;
+		const candidate = configuredProjectsRoot
+			? path.isAbsolute(configuredProjectsRoot)
+				? path.resolve(configuredProjectsRoot)
+				: path.resolve(this.root, configuredProjectsRoot)
 			: path.join(this.root, "projects");
 		if (!isInsidePath(this.root, candidate)) {
 			throw new Error(`Workspace projectsRoot must stay inside repo: ${candidate}`);
@@ -521,7 +524,7 @@ export class FactoryBrandAtomsStore {
 
 	private isDirectory(filePath: string) {
 		try {
-			return existsSync(filePath) && path.extname(filePath) === "";
+			return existsSync(filePath) && statSync(filePath).isDirectory();
 		} catch {
 			return false;
 		}
@@ -536,6 +539,7 @@ export class FactoryBrandAtomsStore {
 				entry.name === ".git" ||
 				entry.name === "node_modules" ||
 				entry.name === "dist" ||
+				entry.name === "worktree" ||
 				entry.name === "release"
 			) {
 				continue;

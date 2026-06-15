@@ -160,6 +160,14 @@ const factoryCss = `
 	background: var(--bg-hover);
 	color: var(--text-primary);
 }
+.factory-button:active,
+.factory-icon-button:active,
+.factory-project-switcher:active,
+.factory-profile-chip:active {
+	border-color: var(--accent);
+	color: var(--text-primary);
+	transform: translateY(1px);
+}
 .factory-button:focus-visible,
 .factory-icon-button:focus-visible,
 .factory-project-switcher:focus-visible,

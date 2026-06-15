@@ -171,3 +171,86 @@ ${source.propagationPlan || "No propagation plan exists yet."}`;
 
 export const buildIntakeListLabel = (item: IntakeListItem) =>
   `${item.title} (${item.project_id} / ${item.type} / ${item.status})`;
+
+export type WorkOrderComposerReference = {
+  kind: "file" | "url" | "text";
+  value: string;
+  label?: string;
+};
+
+export type WorkOrderComposerPromptSource = {
+  mode: "single" | "project-launch";
+  projectId: string;
+  operatorIntent: string;
+  operatorMessage?: string;
+  authorUser: string;
+  assignedToUser: string;
+  references: WorkOrderComposerReference[];
+  priorDraftYaml?: string;
+};
+
+const renderComposerReferences = (references: WorkOrderComposerReference[]) =>
+  references.length
+    ? references
+        .map((reference) => `- ${reference.kind}: ${reference.label || reference.value}`)
+        .join("\n")
+    : "- none";
+
+const composerBasePrompt = (source: WorkOrderComposerPromptSource) => `You are INTAKE_STEWARD drafting queued Software Factory work orders from an operator's plain-English intent.
+
+Follow these rules:
+- Return ONLY JSON. No markdown fences.
+- Keep user-facing language plain English.
+- Do not modify files.
+- Author defaults to ${source.authorUser}; assigned_to defaults to ${source.assignedToUser}.
+- Every draft must have status queued, project_id ${source.projectId}, and depends_on populated when a dependency exists.
+- Keep scopes reviewable; if the request is large, split into a small graph of work orders with clear dependency edges.
+
+Project: ${source.projectId}
+Mode: ${source.mode}
+References:
+${renderComposerReferences(source.references)}
+
+Original operator intent:
+${source.operatorIntent}
+
+${source.operatorMessage ? `Latest operator refinement:\n${source.operatorMessage}\n` : ""}
+${source.priorDraftYaml ? `Current draft YAML:\n${source.priorDraftYaml}\n` : ""}
+`;
+
+export const buildWorkOrderDraftPrompt = (source: WorkOrderComposerPromptSource) => `${composerBasePrompt(source)}
+Return this JSON shape:
+{
+  "steward_turn": "plain-English summary of the draft and any assumptions",
+  "work_orders": [
+    {
+      "title": "short durable work-order title",
+      "intent": "plain-English work-order intent",
+      "pipeline_variant": "dashboard_or_ui_feature | documentation_or_content | default",
+      "risk_classification": "low | medium | high",
+      "rigor_tier": "T1 | T2 | T3",
+      "depends_on": [],
+      "acceptance_criteria": ["specific check"],
+      "verification_commands": ["command to run"]
+    }
+  ]
+}`;
+
+export const buildProjectLaunchWorkOrderPrompt = (source: WorkOrderComposerPromptSource) => `${composerBasePrompt(source)}
+Return this JSON shape:
+{
+  "steward_turn": "plain-English summary of the proposed multi-WO graph",
+  "work_orders": [
+    {
+      "title": "short durable work-order title",
+      "intent": "plain-English work-order intent",
+      "pipeline_variant": "dashboard_or_ui_feature | documentation_or_content | default",
+      "risk_classification": "low | medium | high",
+      "rigor_tier": "T1 | T2 | T3",
+      "depends_on": ["temporary title or id of prerequisite draft"],
+      "acceptance_criteria": ["specific check"],
+      "verification_commands": ["command to run"]
+    }
+  ],
+  "cohorts": [["title or id that can run first"], ["title or id that runs after dependencies"]]
+}`;

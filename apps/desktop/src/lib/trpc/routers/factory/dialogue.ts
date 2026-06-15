@@ -246,6 +246,7 @@ function statusFromError(
 		label: provider === "claude" ? "Claude CLI" : "Codex CLI",
 		connected: false,
 		binaryOk: failureKind !== "binary_missing",
+		authOk: failureKind !== "auth",
 		roundTripOk: false,
 		checkedAt: new Date().toISOString(),
 		message:
@@ -255,6 +256,13 @@ function statusFromError(
 					? "Check network/service status, then click Reconnect."
 					: message,
 		details: message,
+		diagnostics: [
+			{
+				label: "Dialogue CLI invocation",
+				status: "fail",
+				detail: message,
+			},
+		],
 		failureKind,
 	};
 }

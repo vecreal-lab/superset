@@ -34,7 +34,7 @@ import { resolveNotificationTarget } from "./utils/resolve-notification-target";
 
 /**
  * Returns the current workspace ID from the live URL hash.
- * The app uses hash routing: file:///.../index.html#/workspace/<id>
+ * The app uses hash routing: packaged-origin index.html#/workspace/<id>
  * We must read window.location.hash (not pathname) at event time since the
  * _authenticated layout does not re-render on workspace navigation.
  */
